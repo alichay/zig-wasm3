@@ -18,3 +18,13 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
 pub fn addTo(exe: *std.build.LibExeObjStep) void {
     submod_build_plugin.addTo(exe, repoDir(exe.builder));
 }
+
+var file_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
+pub fn pkg(name: ?[]const u8) std.build.Pkg {
+    var fba = std.heap.FixedBufferAllocator.init(&file_buf);
+    return .{
+        .name = name orelse "wasm3",
+        .path = std.fs.path.join(&fba.allocator, &[_][]const u8{std.fs.path.dirname(@src().file).?, "src", "main.zig"}) catch unreachable,
+    };
+}
