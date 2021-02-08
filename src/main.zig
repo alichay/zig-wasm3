@@ -310,16 +310,18 @@ pub const Module = struct {
 
         comptime const decls = std.meta.declarations(library);
         inline for(decls) |decl| {
-            switch(decl.data) {
-                .Fn => |fninfo| {
-                    const fn_name_z = comptime get_name: {
-                        var name_buf: [decl.name.len:0]u8 = undefined;
-                        std.mem.copy(u8, &name_buf, decl.name);
-                        break :get_name name_buf;
-                    };
-                    try this.linkRawFunction(library_name, &fn_name_z, @field(library, decl.name), userdata);
-                },
-                else => continue,
+            if(decl.is_pub) {
+                switch(decl.data) {
+                    .Fn => |fninfo| {
+                        const fn_name_z = comptime get_name: {
+                            var name_buf: [decl.name.len:0]u8 = undefined;
+                            std.mem.copy(u8, &name_buf, decl.name);
+                            break :get_name name_buf;
+                        };
+                        try this.linkRawFunction(library_name, &fn_name_z, @field(library, decl.name), userdata);
+                    },
+                    else => continue,
+                }
             }
         }
     }
