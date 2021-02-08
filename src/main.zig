@@ -389,8 +389,15 @@ pub const Module = struct {
             switch(@typeInfo(@TypeOf(function))) {
                 .Fn => |fnti| {
 
+
                     const RetT = fnti.return_type orelse void;
-                    const RetPtr = if(RetT == void) void else *RetT;
+
+                    const ret_is_localptr = switch(@typeInfo(RetT)) {
+                        .Struct => @hasDecl(RetT, "_is_wasm3_local_ptr"),
+                        else => false,
+                    };
+
+                    const RetPtr = if(RetT == void) void else if(ret_is_localptr) *RetT.Base else *RetT;
                     var ret_val: RetPtr = undefined;
                     if(RetT != void) {
                         ret_val = @intToPtr(*RetT, stack);
@@ -432,7 +439,12 @@ pub const Module = struct {
                     if(RetT == void) {
                         @call(.{.modifier = .always_inline}, function, args);
                     } else {
-                        ret_val.* = @call(.{.modifier = .always_inline}, function, args);
+                        const returned_value = @call(.{.modifier = .always_inline}, function, args);
+                        if(ret_is_localptr) {
+                            ret_val.* = returned_value.localPtr();
+                        } else {
+                            ret_val.* = returned_value;
+                        }
                     }
 
                     return c.m3Err_none;
