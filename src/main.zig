@@ -148,7 +148,11 @@ pub const Function = struct {
     pub inline fn getRetType(this: Function, idx: u32) c.M3ValueType {
         return c.m3_GetRetType(this.impl, idx);
     }
-    pub inline fn call(this: Function, args: anytype) !void {
+    /// Call a function, using a provided tuple for arguments.
+    /// TYPES ARE NOT VALIDATED. Be careful
+    /// TDOO: Test this! Zig has weird symbol export issues with wasm right now,
+    ///       so I can't verify that arguments or return values are properly passes!
+    pub inline fn call(this: Function, comptime RetType: type, args: anytype) !RetType {
         const ArgsType = @TypeOf(args);
         if (@typeInfo(ArgsType) != .Struct) {
             @compileError("Expected tuple or struct argument, found " ++ @typeName(ArgsType));
@@ -156,12 +160,58 @@ pub const Function = struct {
         const fields_info = std.meta.fields(ArgsType);
 
         const count = fields_info.len;
-        var arg_arr: [count]*c_void = undefined;
+        var arg_arr: [count]?*const c_void = undefined;
         inline for(args) |*a, i| {
-            arg_arr = @ptrCast(*c_void, a);
+            const arg_is_ptr = switch(@typeInfo(RetType)) {
+                .Struct => @hasDecl(RetType, "_is_wasm3_local_ptr"),
+                else => false,
+            };
+            if(arg_is_ptr) {
+                arg_arr[i] = @intToPtr(?*const c_void,
+                    @truncate(u32, @ptrToInt(a.host_ptr) - @ptrToInt(a.local_heap))
+                );
+            } else {
+                arg_arr[i] = @ptrCast(?*const c_void, a);
+            }
         }
-        const arg_arr_slc: []*c_void = &arg_arr;
-        return mapError(c.m3_CallWithArgs(this.impl, @intCast(u32, count), @ptrCast([*c][*c]u8, arg_arr_slc.ptr)));
+        // TODO: Perhaps we should use CallWithArgs instead of Call?
+        //       Call passes pointers to params, while CallWithArgs
+        //       creates a packed buffer of actual data instead.
+        //       This is kind of a nitpick though
+        try mapError(c.m3_Call(this.impl, @intCast(u32, count), if(count == 0) null else &arg_arr));
+        
+
+        const is_ptr = switch(@typeInfo(RetType)) {
+            .Struct => @hasDecl(RetType, "_is_wasm3_local_ptr"),
+            else => false,
+        };
+
+        if(RetType == void) return;
+
+        const Extensions = struct {
+            pub extern fn wasm3_addon_get_runtime_stack(rt: c.IM3Runtime) [*c]u8;
+            pub extern fn wasm3_addon_get_runtime_mem_ptr(rt: c.IM3Runtime) [*c]u8;
+            pub extern fn wasm3_addon_get_fn_rt(func: c.IM3Function) c.IM3Runtime;
+        };
+
+        const runtime_ptr = Extensions.wasm3_addon_get_fn_rt(this.impl);
+        const stack_ptr = Extensions.wasm3_addon_get_runtime_stack(runtime_ptr);
+
+        if(is_ptr) {
+            const mem_ptr = Extensions.wasm3_addon_get_runtime_mem_ptr(runtime_ptr);
+            return RetType {
+                .local_heap = mem_ptr,
+                .host_ptr = @intToPtr(*RetType.Base, @ptrToInt(mem_ptr) + @intCast(usize, @intToPtr(*u32, stack_ptr).*)),
+            };
+        }
+        switch(RetType) {
+            i8, i16, i32, i64,
+            u8, u16, u32, u64,
+            f32, f64 => {
+                return @ptrCast(RetType, @ptrCast(*RetType, stack_ptr)).*;
+            }
+        }
+        @compileError("Invalid WebAssembly return type " ++ @typeName(RetType) ++ "!");
     }
 };
 
@@ -189,6 +239,29 @@ pub fn NativePtr(comptime T: type) type {
         pub inline fn read(this: Self) T {
             return std.mem.readIntLittle(T, std.mem.asBytes(this.host_ptr));
         }
+        inline fn offsetBy(this: Self, offset: i64) *T {
+            return @intToPtr(*T, get_ptr: {
+                if(offset > 0) {
+                    break :get_ptr @ptrToInt(this.host_ptr) + @intCast(usize, offset);
+                } else {
+                    break :get_ptr @ptrToInt(this.host_ptr) - @intCast(usize, -offset);
+                }
+            });
+        }
+        /// Offset is in bytes, NOT SAFETY CHECKED.
+        pub inline fn writeOffset(this: Self, offset: i64, val: T) void {
+            std.mem.writeIntLittle(T, std.mem.asBytes(this.offsetBy(offset)), val);
+        }
+        /// Offset is in bytes, NOT SAFETY CHECKED.
+        pub inline fn readOffset(this: Self, offset: i64) T {
+            std.mem.readIntLittle(T, std.mem.asBytes(this.offsetBy(offset)));
+        }
+        pub usingnamespace if(T == u8) struct {
+            /// NOT SAFETY CHECKED.
+            pub inline fn slice(this: Self, len: u32) []T {
+                return @ptrCast([*]u8, this.host_ptr)[0..@intCast(usize, len)];
+            }
+        } else struct {};
     };
 }
 
@@ -203,8 +276,8 @@ pub const Module = struct {
     fn mapTypeToChar(comptime T: type) u8 {
         switch(T) {
             void => return 'v',
-            i32 =>  return 'i',
-            i64 =>  return 'I',
+            u32, i32 =>  return 'i',
+            u64, i64 =>  return 'I',
             f32 =>  return 'f',
             f64 =>  return 'F',
             else => {},
@@ -226,14 +299,49 @@ pub const Module = struct {
         return mapError(c.m3_LinkWASI(this.impl));
     }
 
+    /// Links all functions in a struct to the module.
+    /// library_name: the name of the library this function should belong to.
+    /// library: a struct containing functions that should be added to the module.
+    ///          See linkRawFunction(...) for information about valid function signatures.
+    /// userdata: A single-item pointer passed to the function as the first argument when called.
+    ///           Not accessible from within wasm, handled by the interpreter.
+    ///           If you don't want userdata, pass a void literal {}.
+    pub fn linkLibrary(this: Module, library_name: [:0]const u8, comptime library: type, userdata: anytype) !void {
+
+        comptime const decls = std.meta.declarations(library);
+        inline for(decls) |decl| {
+            switch(decl.data) {
+                .Fn => |fninfo| {
+                    const fn_name_z = comptime get_name: {
+                        var name_buf: [decl.name.len:0]u8 = undefined;
+                        std.mem.copy(u8, &name_buf, decl.name);
+                        break :get_name name_buf;
+                    };
+                    try this.linkRawFunction(library_name, &fn_name_z, @field(library, decl.name), userdata);
+                },
+                else => continue,
+            }
+        }
+    }
+
+    /// Links a native function into the module.
+    /// library_name: the name of the library this function should belong to.
+    /// function_name: the name the function should have in module-space.
+    /// function: a zig function (not function pointer!).
+    ///           Valid argument and return types are:
+    ///             i32, u32, i64, u64, f32, f64, void, and pointers to basic types.
+    ///           Userdata, if provided, is the first argument to the function.
+    /// userdata: A single-item pointer passed to the function as the first argument when called.
+    ///           Not accessible from within wasm, handled by the interpreter.
+    ///           If you don't want userdata, pass a void literal {}.
     pub fn linkRawFunction(
         this: Module,
-        module_name: [:0]const u8,
+        library_name: [:0]const u8,
         function_name: [:0]const u8,
         comptime function: anytype,
         userdata: anytype
     ) !void {
-        const has_userdata = @TypeOf(userdata) != void;
+        comptime const has_userdata = @TypeOf(userdata) != void;
         comptime validate_userdata: {
             if(has_userdata) {
                 switch(@typeInfo(@TypeOf(userdata))) {
@@ -241,11 +349,13 @@ pub const Module = struct {
                         if(ptrti.size == .One) {
                             break :validate_userdata;
                         }
-                    }
+                    },
+                    else => {},
                 }
                 @compileError("Expected a single-item pointer for the userdata, got " ++ @typeName(@TypeOf(userdata)));
             }
         }
+        const UserdataType = @TypeOf(userdata);
         const sig = comptime generate_signature: {
             switch(@typeInfo(@TypeOf(function))) {
                 .Fn => |fnti| {
@@ -270,7 +380,7 @@ pub const Module = struct {
 
             comptime var type_arr: []const type = &[0]type{};
             if(has_userdata) {
-                type_arr = type_arr ++ @as([]const type, &[1]type{@TypeOf(userdata)});
+                type_arr = type_arr ++ @as([]const type, &[1]type{UserdataType});
             }
             var mem = @ptrToInt(_mem);
             var stack = @ptrToInt(sp);
@@ -297,7 +407,7 @@ pub const Module = struct {
 
                     comptime var idx: usize = 0;
                     if(has_userdata) {
-                        args[idx] = @ptrCast(@TypeOf(userdata), @alignCast(@alignOf(std.meta.Child(userdata)), arg_userdata));
+                        args[idx] = @ptrCast(UserdataType, @alignCast(@alignOf(std.meta.Child(UserdataType)), arg_userdata));
                         idx += 1;
                     }
                     inline for(fnti.args[sub_data..]) |arg, i| {
@@ -330,7 +440,7 @@ pub const Module = struct {
                 else => unreachable,
             }
         }}.l;
-        try mapError(c.m3_LinkRawFunctionEx(this.impl, module_name, function_name, @as([*]const u8, &sig), lambda, if(has_userdata) userdata else null));
+        try mapError(c.m3_LinkRawFunctionEx(this.impl, library_name, function_name, @as([*]const u8, &sig), lambda, if(has_userdata) userdata else null));
     }
 };
 

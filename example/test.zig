@@ -35,12 +35,28 @@ pub fn main() !void {
     try rt.loadModule(mod);
     try mod.linkWasi();
 
+    try mod.linkLibrary("libtest", struct {
+        pub inline fn add(_: *std.mem.Allocator, lh: i32, rh: i32, mul: wasm3.NativePtr(i32)) i32 {
+            mul.write(lh * rh);
+            return lh + rh;
+        }
+        pub inline fn getArgv0(allocator: *std.mem.Allocator, str: wasm3.NativePtr(u8), max_len: u32) u32 {
+            var in_buf = str.slice(max_len);
+
+            var arg_iter = std.process.args();
+            defer arg_iter.deinit();
+            var first_arg = (arg_iter.next(allocator) orelse return 0) catch return 0;
+            defer allocator.free(first_arg);
+
+            if(first_arg.len > in_buf.len) return 0;
+            std.mem.copy(u8, in_buf, first_arg);
+            
+            return @truncate(u32, first_arg.len);
+        }
+    }, a);
+
     var add = try rt.findFunction("_start");
-    try mod.linkRawFunction("libtest", "add", struct{pub fn add(lh: i32, rh: i32, mul: wasm3.NativePtr(i32)) i32 {
-        mul.write(lh * rh);
-        return lh + rh;
-    }}.add, {});
-    add.call(.{}) catch |e| switch(e) {
+    add.call(void, .{}) catch |e| switch(e) {
         error.TrapExit => {},
         else => return e,
     };

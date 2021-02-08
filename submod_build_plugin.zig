@@ -35,6 +35,14 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
         }
     }
 
+    lib.addIncludeDir(src_dir);
+
+    lib.addCSourceFile(std.fs.path.join(b.allocator, &[_][]const u8{
+        std.fs.path.dirname(@src().file).?,
+        "src", "wasm3_extra.c"
+    }) catch unreachable, &cflags);
+
+
     return lib;
 }
 
