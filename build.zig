@@ -27,7 +27,7 @@ pub fn build(b: *Builder) void {
     };
     wasm_build.out_filename = "wasm_example.wasm";
 
-    self_plugin.addTo(exe, pkgs);
+    self_plugin.addTo(exe);
     exe.addPackagePath("wasm3", "src/main.zig");
 
     exe.install();
