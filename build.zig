@@ -1,7 +1,7 @@
 const std = @import("std");
 const Builder = std.build.Builder;
 
-pub const pkgs = @import("deps.zig").pkgs;
+pub const pkgs = @import("gyro").pkgs;
 const self_plugin = @import("gyro_plugin.zig");
 
 pub fn build(b: *Builder) void {
@@ -27,7 +27,7 @@ pub fn build(b: *Builder) void {
     };
     wasm_build.out_filename = "wasm_example.wasm";
 
-    self_plugin.addTo(exe);
+    self_plugin.addTo(exe, pkgs);
     exe.addPackagePath("wasm3", "src/main.zig");
 
     exe.install();
