@@ -26,13 +26,45 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
         "-Wno-unused-function", "-Wno-unused-variable", "-Wno-unused-parameter", "-Wno-missing-field-initializers"
     };
 
+    var core_src_file: ?[]const u8 = undefined;
+
     var iter = src_dir_handle.iterate();
     while(iter.next() catch unreachable) |ent| {
         if(ent.kind == .File) {
             if(std.ascii.endsWithIgnoreCase(ent.name, ".c")) {
-                lib.addCSourceFile(std.fs.path.join(b.allocator, &[_][]const u8{src_dir, ent.name}) catch unreachable, &cflags);
+                const path = std.fs.path.join(b.allocator, &[_][]const u8{src_dir, ent.name}) catch unreachable;
+                if(std.ascii.eqlIgnoreCase(ent.name, "m3_core.c")) {
+                    core_src_file = path;
+                    continue;
+                }
+                lib.addCSourceFile(path, &cflags);
             }
         }
+    }
+
+    std.debug.assert(core_src_file != null);
+
+    { // Patch source files.
+
+        // wasm3 has a built-in limit for what it thinks should be the maximum sane length for a utf-8 string
+        // It's 2000 characters, which seems reasonable enough.
+        //
+        // Here's the thing - C++ is not reasonable.
+        // libc++'s rtti symbols exceed four-freakin'-thousand characters sometimes.
+        // In order to support compiled C++ programs, we patch this value.
+        //
+        // It's kind of ugly, but it works!
+
+        var build_root_handle = std.fs.cwd().openDir(wasm3_src_root, .{}) catch unreachable;
+        defer build_root_handle.close();
+
+        std.fs.cwd().copyFile(core_src_file.?, build_root_handle, "m3_core.c", .{}) catch unreachable;
+        lib.addCSourceFile(std.fs.path.join(b.allocator, &[_][]const u8{wasm3_src_root, "m3_core.c"}) catch unreachable, &cflags);
+
+        build_root_handle.writeFile("m3_core.h", "#include <m3_core.h>\n" ++
+                                                 "#undef d_m3MaxSaneUtf8Length\n" ++
+                                                 "#define d_m3MaxSaneUtf8Length 10000\n") catch unreachable;
+
     }
 
     lib.addIncludeDir(src_dir);
