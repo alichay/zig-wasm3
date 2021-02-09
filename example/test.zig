@@ -80,8 +80,3 @@ pub fn main() !void {
 
     try print_fn.call(void, .{buffer_np});
 }
-
-export fn getrandom(buf: [*c]u8, len: usize, flags: c_uint) i64 {
-    std.os.getrandom(buf[0..len]) catch return 0;
-    return @intCast(i64, len);
-}

@@ -510,3 +510,11 @@ pub inline fn printM3Info() void {
 pub inline fn printProfilerInfo() void {
     c.m3_PrintProfilerInfo();
 }
+
+pub usingnamespace if(std.Target.current.abi.isGnu() and std.Target.current.os.tag != .windows) struct {
+    // Glibc's getrandom is namespaced, but for some reason m3 is building without that namespace.
+    export fn getrandom(buf: [*c]u8, len: usize, flags: c_uint) i64 {
+        std.os.getrandom(buf[0..len]) catch return 0;
+        return @intCast(i64, len);
+    }
+} else struct {};
