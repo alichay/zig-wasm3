@@ -6,12 +6,13 @@ fn getWasm3Src() []const u8 {
     const sep = std.fs.path.sep_str;
     comptime {
         const gyro_dir = get_gyro: {
-            const parent_dir = std.fs.path.dirname(std.fs.path.dirname(@src().file).?).?;
-            const maybe_repo_dir = std.fs.path.dirname(parent_dir);
-            const further_parent = if(maybe_repo_dir) |rd| std.fs.path.dirname(rd) else null;
-            if(std.ascii.eqlIgnoreCase(std.fs.path.basename(parent_dir), "pkg") and further_parent != null and
-               std.ascii.eqlIgnoreCase(std.fs.path.basename(further_parent.?), ".gyro")) {
-                break :get_gyro further_parent.?;
+            const parent_dir = std.fs.path.dirname(@src().file).?;
+            const maybe_clone_hash_dir = std.fs.path.dirname(parent_dir);
+            const maybe_gyro_dir = if(maybe_clone_hash_dir) |d| std.fs.path.dirname(d) else null;
+
+            if(std.ascii.eqlIgnoreCase(std.fs.path.basename(parent_dir), "pkg") and maybe_gyro_dir != null and
+               std.ascii.eqlIgnoreCase(std.fs.path.basename(maybe_gyro_dir.?), ".gyro")) {
+                break :get_gyro maybe_gyro_dir.?;
             } else {
                 break :get_gyro std.fs.path.dirname(@src().file).? ++ sep ++ ".gyro";
             }
