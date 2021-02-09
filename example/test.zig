@@ -55,11 +55,30 @@ pub fn main() !void {
         }
     }, a);
 
-    var add = try rt.findFunction("_start");
-    add.call(void, .{}) catch |e| switch(e) {
+    var start_fn = try rt.findFunction("_start");
+    start_fn.call(void, .{}) catch |e| switch(e) {
         error.TrapExit => {},
         else => return e,
     };
+
+    var add_five_fn = try rt.findFunction("addFive");
+    const num: i32 = 7;
+    std.debug.warn("Adding 5 to {d}: got {d}!\n", .{num, try add_five_fn.call(i32, .{num})});
+
+    var alloc_fn = try rt.findFunction("allocBytes");
+    var print_fn = try rt.findFunction("printStringZ");
+
+    const my_string = "Hello, world!";
+
+    var buffer_np = try alloc_fn.call(wasm3.NativePtr(u8), .{@as(u32, my_string.len + 1)});
+    var buffer = buffer_np.slice(my_string.len + 1);
+
+    std.debug.warn("Allocated buffer!\n{}\n", .{buffer});
+
+    std.mem.copy(u8, buffer, my_string);
+    buffer[my_string.len] = 0;
+
+    try print_fn.call(void, .{buffer_np});
 }
 
 export fn getrandom(buf: [*c]u8, len: usize, flags: c_uint) i64 {

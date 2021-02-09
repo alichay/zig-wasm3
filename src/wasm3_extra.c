@@ -6,11 +6,6 @@
 #include <m3_env.h>
 #include <m3_exec_defs.h>
 
-void *wasm3_addon_get_runtime_stack(M3Runtime *runtime) {
-
-    return runtime->stack;
-}
-
 u8 *wasm3_addon_get_runtime_mem_ptr(M3Runtime *runtime) {
     return m3MemData(runtime->memory.mallocated);
 }

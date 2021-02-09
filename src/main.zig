@@ -153,31 +153,51 @@ pub const Function = struct {
     /// TDOO: Test this! Zig has weird symbol export issues with wasm right now,
     ///       so I can't verify that arguments or return values are properly passes!
     pub inline fn call(this: Function, comptime RetType: type, args: anytype) !RetType {
+
+        if(this.getRetCount() > 1) {
+            return error.TooManyReturnValues;
+        }
+
         const ArgsType = @TypeOf(args);
         if (@typeInfo(ArgsType) != .Struct) {
             @compileError("Expected tuple or struct argument, found " ++ @typeName(ArgsType));
         }
         const fields_info = std.meta.fields(ArgsType);
 
+
         const count = fields_info.len;
+        comptime var ptr_i: comptime_int = 0;
+        const num_pointers = comptime ptr_count: {
+            var num_ptrs: comptime_int = 0;
+            var i: comptime_int = 0;
+            inline while(i < count) : (i += 1) {
+                const ArgType = @TypeOf(args[i]);
+                const arg_is_ptr = switch(@typeInfo(ArgType)) {
+                    .Struct => @hasDecl(ArgType, "_is_wasm3_local_ptr"),
+                    else => false,
+                };
+                if(arg_is_ptr) num_ptrs += 1;
+            }
+            break :ptr_count num_ptrs;
+        };
+        var pointer_values: [num_pointers]u32 = undefined;
+
         var arg_arr: [count]?*const c_void = undefined;
-        inline for(args) |*a, i| {
-            const arg_is_ptr = switch(@typeInfo(RetType)) {
-                .Struct => @hasDecl(RetType, "_is_wasm3_local_ptr"),
+        comptime var i: comptime_int = 0;
+        inline while(i < count) : (i += 1) {
+            const ArgType = @TypeOf(args[i]);
+            const arg_is_ptr = switch(@typeInfo(ArgType)) {
+                .Struct => @hasDecl(ArgType, "_is_wasm3_local_ptr"),
                 else => false,
             };
             if(arg_is_ptr) {
-                arg_arr[i] = @intToPtr(?*const c_void,
-                    @truncate(u32, @ptrToInt(a.host_ptr) - @ptrToInt(a.local_heap))
-                );
+                pointer_values[ptr_i] = args[i].localPtr();
+                arg_arr[i] = @ptrCast(?*const c_void, &pointer_values[ptr_i]);
+                ptr_i += 1;
             } else {
-                arg_arr[i] = @ptrCast(?*const c_void, a);
+                arg_arr[i] = @ptrCast(?*const c_void, &args[i]);
             }
         }
-        // TODO: Perhaps we should use CallWithArgs instead of Call?
-        //       Call passes pointers to params, while CallWithArgs
-        //       creates a packed buffer of actual data instead.
-        //       This is kind of a nitpick though
         try mapError(c.m3_Call(this.impl, @intCast(u32, count), if(count == 0) null else &arg_arr));
         
 
@@ -189,27 +209,29 @@ pub const Function = struct {
         if(RetType == void) return;
 
         const Extensions = struct {
-            pub extern fn wasm3_addon_get_runtime_stack(rt: c.IM3Runtime) [*c]u8;
             pub extern fn wasm3_addon_get_runtime_mem_ptr(rt: c.IM3Runtime) [*c]u8;
             pub extern fn wasm3_addon_get_fn_rt(func: c.IM3Function) c.IM3Runtime;
         };
 
         const runtime_ptr = Extensions.wasm3_addon_get_fn_rt(this.impl);
-        const stack_ptr = Extensions.wasm3_addon_get_runtime_stack(runtime_ptr);
+        var return_data_buffer: u64 = undefined;
+        var return_ptr: *c_void = @ptrCast(*c_void, &return_data_buffer);
+        try mapError(c.m3_GetResults(this.impl, 1, &[1]?*c_void{return_ptr}));
 
         if(is_ptr) {
             const mem_ptr = Extensions.wasm3_addon_get_runtime_mem_ptr(runtime_ptr);
             return RetType {
-                .local_heap = mem_ptr,
-                .host_ptr = @intToPtr(*RetType.Base, @ptrToInt(mem_ptr) + @intCast(usize, @intToPtr(*u32, stack_ptr).*)),
+                .local_heap = @ptrToInt(mem_ptr),
+                .host_ptr = @intToPtr(*RetType.Base, @ptrToInt(mem_ptr) + @intCast(usize, @ptrCast(*u32, @alignCast(@alignOf(u32), return_ptr)).*)),
             };
         }
         switch(RetType) {
             i8, i16, i32, i64,
             u8, u16, u32, u64,
             f32, f64 => {
-                return @ptrCast(RetType, @ptrCast(*RetType, stack_ptr)).*;
-            }
+                return @ptrCast(*RetType, @alignCast(@alignOf(RetType), return_ptr)).*;
+            },
+            else => {},
         }
         @compileError("Invalid WebAssembly return type " ++ @typeName(RetType) ++ "!");
     }

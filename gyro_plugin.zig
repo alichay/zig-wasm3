@@ -3,7 +3,7 @@ const root = @import("root");
 const submod_build_plugin = @import("submod_build_plugin.zig");
 
 fn repoDir(b: *std.build.Builder, comptime pkgs: anytype) []const u8 {
-    return std.fs.path.resolve(b.allocator, &[_][]const u8{b.build_root, getWasm3Src(pkgs), "..", ".."}) catch unreachable;
+    return std.fs.path.resolve(b.allocator, &[_][]const u8{b.build_root, getWasm3Src(pkgs), ".."}) catch unreachable;
 }
 
 fn getWasm3Src(comptime p: anytype) []const u8 {

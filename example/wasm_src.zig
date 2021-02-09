@@ -6,6 +6,27 @@ extern "libtest" fn getArgv0(str_buf: [*]u8, max_len: u32) u32;
 
 const max_arg_size = 256;
 
+export fn allocBytes(size: u32) [*]u8 {
+    var mem = std.heap.page_allocator.alloc(u8, @intCast(usize, size)) catch {
+        std.debug.panic("Memory allocation failed!\n", .{});
+    };
+    for(mem) |*v, i| v.* = @intCast(u8, i);
+    return mem.ptr;
+}
+
+export fn printStringZ(str: ?[*:0]const u8) void {
+    std.debug.warn("printStringZ: ", .{});
+    if(str) |s| {
+        std.debug.warn("\"{s}\"\n", .{std.mem.span(str)});
+    } else {
+        std.debug.warn("null\n", .{});
+    }
+}
+
+export fn addFive(num: i32) i32 {
+    return num + 5;
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();

@@ -20,7 +20,7 @@ pub fn build(b: *Builder) void {
     exe.setBuildMode(mode);
     exe.install();
 
-    const wasm_build = b.addExecutable("wasm_example", "example/wasm_src.zig");
+    const wasm_build = b.addStaticLibrary("wasm_example", "example/wasm_src.zig");
     wasm_build.target = std.zig.CrossTarget {
         .cpu_arch = .wasm32,
         .os_tag = .wasi,
