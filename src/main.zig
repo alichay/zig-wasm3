@@ -421,10 +421,10 @@ pub const Module = struct {
                         else => false,
                     };
 
-                    const RetPtr = if(RetT == void) void else if(ret_is_localptr) *RetT.Base else *RetT;
+                    const RetPtr = if(RetT == void) void else if(ret_is_localptr) *u32 else *RetT;
                     var ret_val: RetPtr = undefined;
                     if(RetT != void) {
-                        ret_val = @intToPtr(*RetT, stack);
+                        ret_val = @intToPtr(RetPtr, stack);
                     }
                     
                     const sub_data = if(has_userdata) 1 else 0;
