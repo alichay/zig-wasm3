@@ -172,11 +172,9 @@ pub const Function = struct {
             var i: comptime_int = 0;
             inline while(i < count) : (i += 1) {
                 const ArgType = @TypeOf(args[i]);
-                const arg_is_ptr = switch(@typeInfo(ArgType)) {
-                    .Struct => @hasDecl(ArgType, "_is_wasm3_local_ptr"),
-                    else => false,
-                };
-                if(arg_is_ptr) num_ptrs += 1;
+                if(comptime isNativePtr(ArgType) or comptime isOptNativePtr(ArgType)) {
+                    num_ptrs += 1;
+                }
             }
             break :ptr_count num_ptrs;
         };
@@ -186,12 +184,8 @@ pub const Function = struct {
         comptime var i: comptime_int = 0;
         inline while(i < count) : (i += 1) {
             const ArgType = @TypeOf(args[i]);
-            const arg_is_ptr = switch(@typeInfo(ArgType)) {
-                .Struct => @hasDecl(ArgType, "_is_wasm3_local_ptr"),
-                else => false,
-            };
-            if(arg_is_ptr) {
-                pointer_values[ptr_i] = args[i].localPtr();
+            if(comptime isNativePtr(ArgType) or comptime isOptNativePtr(ArgType)) {
+                pointer_values[ptr_i] = toLocalPtr(args[i]);
                 arg_arr[i] = @ptrCast(?*const c_void, &pointer_values[ptr_i]);
                 ptr_i += 1;
             } else {
@@ -200,12 +194,6 @@ pub const Function = struct {
         }
         try mapError(c.m3_Call(this.impl, @intCast(u32, count), if(count == 0) null else &arg_arr));
         
-
-        const is_ptr = switch(@typeInfo(RetType)) {
-            .Struct => @hasDecl(RetType, "_is_wasm3_local_ptr"),
-            else => false,
-        };
-
         if(RetType == void) return;
 
         const Extensions = struct {
@@ -218,12 +206,13 @@ pub const Function = struct {
         var return_ptr: *c_void = @ptrCast(*c_void, &return_data_buffer);
         try mapError(c.m3_GetResults(this.impl, 1, &[1]?*c_void{return_ptr}));
 
-        if(is_ptr) {
+        if(comptime isNativePtr(RetType) or comptime isOptNativePtr(RetType)) {
             const mem_ptr = Extensions.wasm3_addon_get_runtime_mem_ptr(runtime_ptr);
-            return RetType {
-                .local_heap = @ptrToInt(mem_ptr),
-                .host_ptr = @intToPtr(*RetType.Base, @ptrToInt(mem_ptr) + @intCast(usize, @ptrCast(*u32, @alignCast(@alignOf(u32), return_ptr)).*)),
-            };
+            return fromLocalPtr(
+                RetType,
+                @ptrCast(*u32, @alignCast(@alignOf(u32), return_ptr)).*,
+                @ptrToInt(mem_ptr),
+            );
         }
         switch(RetType) {
             i8, i16, i32, i64,
@@ -236,6 +225,20 @@ pub const Function = struct {
         @compileError("Invalid WebAssembly return type " ++ @typeName(RetType) ++ "!");
     }
 };
+
+fn isNativePtr(comptime T: type) bool {
+    return switch(@typeInfo(T)) {
+        .Struct => @hasDecl(T, "_is_wasm3_local_ptr"),
+        else => false,
+    };
+}
+
+fn isOptNativePtr(comptime T: type) bool {
+    return switch(@typeInfo(T)) {
+        .Optional => |opt| isNativePtr(opt.child),
+        else => false,
+    };
+}
 
 pub fn NativePtr(comptime T: type) type {
     comptime {
@@ -287,6 +290,43 @@ pub fn NativePtr(comptime T: type) type {
     };
 }
 
+fn fromLocalPtr(comptime T: type, localptr: u32, local_heap: usize) T {
+    if(comptime isOptNativePtr(T)) {
+        const Child = std.meta.Child(T);
+        if(localptr == 0) return null;
+        return Child {
+            .local_heap = local_heap,
+            .host_ptr = @intToPtr(*Child.Base, local_heap + @intCast(usize, localptr)),
+        };
+    } else if(comptime isNativePtr(T)) {
+        std.debug.assert(localptr != 0);
+        return T {
+            .local_heap = local_heap,
+            .host_ptr = @intToPtr(*T.Base, local_heap + @intCast(usize, localptr)),
+        };
+    } else {
+        @compileError("Expected a NativePtr or a ?NativePtr");
+    }
+}
+
+fn toLocalPtr(nativeptr: anytype) u32 {
+
+    const T = @TypeOf(nativeptr);
+    if(comptime isOptNativePtr(T)) {
+        if(nativeptr) |np| {
+            const lp = np.localPtr();
+            std.debug.assert(lp != 0);
+            return lp;
+        } else return 0;
+    } else if(comptime isNativePtr(T)) {
+        const lp = nativeptr.localPtr();
+        std.debug.assert(lp != 0);
+        return lp;
+    } else {
+        @compileError("Expected a NativePtr or a ?NativePtr");
+    }
+}
+
 pub const Module = struct {
 
     impl: c.IM3Module,
@@ -304,7 +344,7 @@ pub const Module = struct {
             f64 =>  return 'F',
             else => {},
         }
-        if(@hasDecl(T, "_is_wasm3_local_ptr")) {
+        if(comptime isNativePtr(T) or comptime isOptNativePtr(T)) {
             return '*';
         }
         switch(@typeInfo(T)) {
@@ -365,6 +405,9 @@ pub const Module = struct {
         comptime function: anytype,
         userdata: anytype
     ) !void {
+        errdefer {
+            std.log.err("Failed to link proc {s}.{s}!\n", .{library_name, function_name});
+        }
         comptime const has_userdata = @TypeOf(userdata) != void;
         comptime validate_userdata: {
             if(has_userdata) {
@@ -416,12 +459,9 @@ pub const Module = struct {
 
                     const RetT = fnti.return_type orelse void;
 
-                    const ret_is_localptr = switch(@typeInfo(RetT)) {
-                        .Struct => @hasDecl(RetT, "_is_wasm3_local_ptr"),
-                        else => false,
-                    };
+                    const return_pointer = comptime isNativePtr(RetT) or comptime isOptNativePtr(RetT);
 
-                    const RetPtr = if(RetT == void) void else if(ret_is_localptr) *u32 else *RetT;
+                    const RetPtr = if(RetT == void) void else if(return_pointer) *u32 else *RetT;
                     var ret_val: RetPtr = undefined;
                     if(RetT != void) {
                         ret_val = @intToPtr(RetPtr, stack);
@@ -446,13 +486,8 @@ pub const Module = struct {
 
                         const ArgT = arg.arg_type.?;
 
-                        const is_ptr = switch(@typeInfo(ArgT)) {
-                            .Struct => @hasDecl(ArgT, "_is_wasm3_local_ptr"),
-                            else => false,
-                        };
-                        if(is_ptr) {
-
-                            args[idx] = ArgT{.local_heap = mem, .host_ptr = @intToPtr(*ArgT.Base, mem + @intToPtr(*u32, stack).*)};
+                        if(comptime isNativePtr(ArgT) or comptime isOptNativePtr(ArgT)) {
+                            args[idx] = fromLocalPtr(ArgT, @intToPtr(*u32, stack).*, mem);
                         } else {
                             args[idx] = @intToPtr(*ArgT, stack).*;
                         }
@@ -464,8 +499,8 @@ pub const Module = struct {
                         @call(.{.modifier = .always_inline}, function, args);
                     } else {
                         const returned_value = @call(.{.modifier = .always_inline}, function, args);
-                        if(ret_is_localptr) {
-                            ret_val.* = returned_value.localPtr();
+                        if(return_pointer) {
+                            ret_val.* = toLocalPtr(returned_value);
                         } else {
                             ret_val.* = returned_value;
                         }

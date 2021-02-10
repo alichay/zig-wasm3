@@ -79,4 +79,7 @@ pub fn main() !void {
     buffer[my_string.len] = 0;
 
     try print_fn.call(void, .{buffer_np});
+
+    var optionally_null_np: ?wasm3.NativePtr(u8) = null;
+    try print_fn.call(void, .{optionally_null_np});
 }
