@@ -10,13 +10,13 @@ export fn allocBytes(size: u32) [*]u8 {
     var mem = std.heap.page_allocator.alloc(u8, @intCast(usize, size)) catch {
         std.debug.panic("Memory allocation failed!\n", .{});
     };
-    for(mem) |*v, i| v.* = @intCast(u8, i);
+    for (mem) |*v, i| v.* = @intCast(u8, i);
     return mem.ptr;
 }
 
 export fn printStringZ(str: ?[*:0]const u8) void {
     std.debug.warn("printStringZ: ", .{});
-    if(str) |s| {
+    if (str) |s| {
         std.debug.warn("\"{s}\"\n", .{std.mem.span(str)});
     } else {
         std.debug.warn("null\n", .{});
@@ -38,14 +38,13 @@ pub fn main() !void {
     var mul_res: i32 = 0;
     const add_res = add(a1, a2, &mul_res);
 
-    std.debug.warn("{d} + {d} = {d} (multiplied, it's {d}!)\n", .{a1, a2, add_res, mul_res});
+    std.debug.warn("{d} + {d} = {d} (multiplied, it's {d}!)\n", .{ a1, a2, add_res, mul_res });
 
     var buf = try a.alloc(u8, max_arg_size);
     var written = getArgv0(buf.ptr, buf.len);
-    if(written != 0) {
+    if (written != 0) {
         std.debug.warn("Got string {s}!\n", .{buf[0..@intCast(usize, written)]});
     } else {
         std.debug.warn("Failed to write string! No bytes written.", .{});
     }
-
 }
