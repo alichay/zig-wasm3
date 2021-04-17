@@ -532,12 +532,34 @@ pub fn printProfilerInfo() callconv(.Inline) void {
     c.m3_PrintProfilerInfo();
 }
 
+// HACK: Even though we're linking with libc, there's some disconnect between what wasm3 wants to link to
+//       and what the platform's libc provides.
+//       These functions stll exist, but for various reason, the C code in wasm3 expects functions with
+//       different symbol names than the ones the system provides.
+//       This isn't wasm3's fault, but I don't really know *where* blame lies, so we'll just work around it.
+//       We can just reexport these functions. It's a bit hacky, but it gets things running.
 pub usingnamespace if (std.Target.current.abi.isGnu() and std.Target.current.os.tag != .windows)
     struct {
-        // Glibc's getrandom is namespaced, but for some reason m3 is building without that namespace.
         export fn getrandom(buf: [*c]u8, len: usize, flags: c_uint) i64 {
             std.os.getrandom(buf[0..len]) catch return 0;
             return @intCast(i64, len);
+        }
+    }
+else if (std.Target.current.os.tag == .windows)
+    struct {
+        extern "c" fn _lseek(fd: c_int, offset: c_long, origin: c_int) callconv(.C) c_long;
+        export fn lseek(fd: c_int, offset: c_long, origin: c_int) callconv(.C) c_long {
+            return _lseek(fd, offset, origin);
+        }
+
+        extern "c" fn _fileno(stream: *c_void) callconv(.C) c_int;
+        export fn fileno(stream: *c_void) callconv(.C) c_int {
+            return _fileno(stream);
+        }
+
+        extern "c" fn _setmode(fd: *c_int, mode: c_int) callconv(.C) c_int;
+        export fn setmode(fd: *c_int, mode: c_int) callconv(.C) c_int {
+            return _setmode(fd, mode);
         }
     }
 else
