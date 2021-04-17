@@ -1,6 +1,10 @@
 const std = @import("std");
 const wasm3 = @import("wasm3");
 
+const kib = 1024;
+const mib = 1024 * kib;
+const gib = 1024 * mib;
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -17,9 +21,6 @@ pub fn main() !void {
 
     std.log.info("Loading wasm file {s}!\n", .{args[1]});
 
-    const kib = 1024;
-    const mib = 1024 * kib;
-    const gib = 1024 * mib;
 
     var env = wasm3.Environment.init();
     defer env.deinit();
@@ -34,12 +35,12 @@ pub fn main() !void {
     try rt.loadModule(mod);
     try mod.linkWasi();
 
-    try mod.linkLibrary("libtest", struct {
-        pub fn add(_: *std.mem.Allocator, lh: i32, rh: i32, mul: wasm3.NativePtr(i32)) callconv(.Inline) i32 {
+    try mod.linkLibrary("native_helpers", struct {
+        pub fn add(_: *std.mem.Allocator, lh: i32, rh: i32, mul: wasm3.SandboxPtr(i32)) callconv(.Inline) i32 {
             mul.write(lh * rh);
             return lh + rh;
         }
-        pub fn getArgv0(allocator: *std.mem.Allocator, str: wasm3.NativePtr(u8), max_len: u32) callconv(.Inline) u32 {
+        pub fn getArgv0(allocator: *std.mem.Allocator, str: wasm3.SandboxPtr(u8), max_len: u32) callconv(.Inline) u32 {
             var in_buf = str.slice(max_len);
 
             var arg_iter = std.process.args();
@@ -69,7 +70,7 @@ pub fn main() !void {
 
     const my_string = "Hello, world!";
 
-    var buffer_np = try alloc_fn.call(wasm3.NativePtr(u8), .{@as(u32, my_string.len + 1)});
+    var buffer_np = try alloc_fn.call(wasm3.SandboxPtr(u8), .{@as(u32, my_string.len + 1)});
     var buffer = buffer_np.slice(my_string.len + 1);
 
     std.debug.warn("Allocated buffer!\n{any}\n", .{buffer});
@@ -79,6 +80,55 @@ pub fn main() !void {
 
     try print_fn.call(void, .{buffer_np});
 
-    var optionally_null_np: ?wasm3.NativePtr(u8) = null;
+    var optionally_null_np: ?wasm3.SandboxPtr(u8) = null;
     try print_fn.call(void, .{optionally_null_np});
+
+    try test_globals(a);
+}
+
+/// This is in a separate file because I can't find any
+/// compiler toolchains that actually work with Wasm globals yet (lol)
+/// so we just ship a binary wasm file that works with them
+pub fn test_globals(a: *std.mem.Allocator) !void {
+
+    var env = wasm3.Environment.init();
+    defer env.deinit();
+
+    var rt = env.createRuntime(1 * kib, null);
+    defer rt.deinit();
+    errdefer rt.printError();
+
+    var mod_bytes = try std.fs.cwd().readFileAlloc(a, "example/global.wasm", 512 * kib);
+    defer a.free(mod_bytes);
+    var mod = try env.parseModule(mod_bytes);
+    try rt.loadModule(mod);
+
+    var one = mod.findGlobal("one") orelse {
+        std.debug.panic("Failed to find global \"one\"\n", .{});
+    };
+    var some = mod.findGlobal("some") orelse {
+        std.debug.panic("Failed to find global \"some\"\n", .{});
+    };
+
+    std.debug.warn("'one' value: {d}\n", .{(try one.get()).Float32});
+    std.debug.warn("'some' value: {d}\n", .{(try some.get()).Float32});
+
+    std.debug.warn("Trying to set 'one' value to 5.0, should fail.\n", .{});
+    
+    one.set(.{.Float32 = 5.0}) catch |err| switch(err) {
+        wasm3.Error.SettingImmutableGlobal => {
+            std.debug.warn("Failed successfully!\n", .{});
+        },
+        else => {
+            std.debug.warn("Unexpected error {any}\n", .{err});
+        }
+    };
+    std.debug.warn("'one' value: {d}\n", .{(try one.get()).Float32});
+    if((try one.get()).Float32 != 1.0) {
+        std.log.err("Global 'one' has a different value. This is a wasm3 bug!\n", .{});
+    }
+
+    var some_setter = try rt.findFunction("set_some");
+    try some_setter.call(void, .{@as(f32, 25.0)});
+    std.debug.warn("'some' value: {d}\n", .{(try some.get()).Float32});
 }

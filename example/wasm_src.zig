@@ -1,8 +1,7 @@
 const std = @import("std");
 
-extern "libtest" fn add(a: i32, b: i32, mul: *i32) i32;
-
-extern "libtest" fn getArgv0(str_buf: [*]u8, max_len: u32) u32;
+extern "native_helpers" fn add(a: i32, b: i32, mul: *i32) i32;
+extern "native_helpers" fn getArgv0(str_buf: [*]u8, max_len: u32) u32;
 
 const max_arg_size = 256;
 

@@ -37,9 +37,11 @@ fn mapError(result: c.M3Result) Error!void {
     unreachable;
 }
 
-const Error = error{
-    TypeListOverflow,
+pub const Error = error{
+    // general errors
     MallocFailed,
+
+    // parse errors
     IncompatibleWasmVersion,
     WasmMalformed,
     MisorderedWasmSection,
@@ -47,27 +49,43 @@ const Error = error{
     WasmOverrun,
     WasmMissingInitExpr,
     LebOverflow,
-    MissingUtf8,
+    MissingUTF8,
     WasmSectionUnderrun,
     WasmSectionOverrun,
     InvalidTypeId,
     TooManyMemorySections,
+    TooManyArgsRets,
+
+    // link errors
     ModuleAlreadyLinked,
     FunctionLookupFailed,
     FunctionImportMissing,
+
     MalformedFunctionSignature,
+
+    // compilation errors
     NoCompiler,
     UnknownOpcode,
+    RestictedOpcode,
     FunctionStackOverflow,
     FunctionStackUnderrun,
     MallocFailedCodePage,
     SettingImmutableGlobal,
-    OptimizerFailed,
+    TypeMismatch,
+    TypeCountMismatch,
+
+    // runtime errors
     MissingCompiledCode,
     WasmMemoryOverflow,
     GlobalMemoryNotAllocated,
     GlobaIndexOutOfBounds,
     ArgumentCountMismatch,
+    ArgumentTypeMismatch,
+    GlobalLookupFailed,
+    GlobalTypeMismatch,
+    GlobalNotMutable,
+
+    // traps
     TrapOutOfBoundsMemoryAccess,
     TrapDivisionByZero,
     TrapIntegerOverflow,
@@ -168,7 +186,7 @@ pub const Function = struct {
             var i: comptime_int = 0;
             inline while (i < count) : (i += 1) {
                 const ArgType = @TypeOf(args[i]);
-                if (comptime isNativePtr(ArgType) or comptime isOptNativePtr(ArgType)) {
+                if (comptime isSandboxPtr(ArgType) or comptime isOptSandboxPtr(ArgType)) {
                     num_ptrs += 1;
                 }
             }
@@ -180,7 +198,7 @@ pub const Function = struct {
         comptime var i: comptime_int = 0;
         inline while (i < count) : (i += 1) {
             const ArgType = @TypeOf(args[i]);
-            if (comptime isNativePtr(ArgType) or comptime isOptNativePtr(ArgType)) {
+            if (comptime isSandboxPtr(ArgType) or comptime isOptSandboxPtr(ArgType)) {
                 pointer_values[ptr_i] = toLocalPtr(args[i]);
                 arg_arr[i] = @ptrCast(?*const c_void, &pointer_values[ptr_i]);
                 ptr_i += 1;
@@ -202,7 +220,7 @@ pub const Function = struct {
         var return_ptr: *c_void = @ptrCast(*c_void, &return_data_buffer);
         try mapError(c.m3_GetResults(this.impl, 1, &[1]?*c_void{return_ptr}));
 
-        if (comptime isNativePtr(RetType) or comptime isOptNativePtr(RetType)) {
+        if (comptime isSandboxPtr(RetType) or comptime isOptSandboxPtr(RetType)) {
             const mem_ptr = Extensions.wasm3_addon_get_runtime_mem_ptr(runtime_ptr);
             return fromLocalPtr(
                 RetType,
@@ -218,28 +236,40 @@ pub const Function = struct {
         }
         @compileError("Invalid WebAssembly return type " ++ @typeName(RetType) ++ "!");
     }
+
+    /// Don't free this, it's a member of the Function.
+    /// Returns a generic name if the module is unnamed, such as "<unnamed>"
+    pub fn getName(this: Function) callconv(.Inline) ![:0]const u8 {
+        const name = try mapError(c.m3_GetFunctionName(this.impl));
+        return std.mem.spanZ(name);
+    }
+
+    pub fn getModule(this: Function) callconv(.Inline) Module {
+        return .{.impl = c.m3_GetFunctionModule(this.impl)};
+    }
+
 };
 
-fn isNativePtr(comptime T: type) bool {
+fn isSandboxPtr(comptime T: type) bool {
     return switch (@typeInfo(T)) {
         .Struct => @hasDecl(T, "_is_wasm3_local_ptr"),
         else => false,
     };
 }
 
-fn isOptNativePtr(comptime T: type) bool {
+fn isOptSandboxPtr(comptime T: type) bool {
     return switch (@typeInfo(T)) {
-        .Optional => |opt| isNativePtr(opt.child),
+        .Optional => |opt| isSandboxPtr(opt.child),
         else => false,
     };
 }
 
-pub fn NativePtr(comptime T: type) type {
+pub fn SandboxPtr(comptime T: type) type {
     comptime {
         switch (T) {
             i8, i16, i32, i64 => {},
             u8, u16, u32, u64 => {},
-            else => @compileError("Invalid type for a NativePtr. Must be an integer!"),
+            else => @compileError("Invalid type for a SandboxPtr. Must be an integer!"),
         }
     }
     return struct {
@@ -288,38 +318,38 @@ pub fn NativePtr(comptime T: type) type {
 }
 
 fn fromLocalPtr(comptime T: type, localptr: u32, local_heap: usize) T {
-    if (comptime isOptNativePtr(T)) {
+    if (comptime isOptSandboxPtr(T)) {
         const Child = std.meta.Child(T);
         if (localptr == 0) return null;
         return Child{
             .local_heap = local_heap,
             .host_ptr = @intToPtr(*Child.Base, local_heap + @intCast(usize, localptr)),
         };
-    } else if (comptime isNativePtr(T)) {
+    } else if (comptime isSandboxPtr(T)) {
         std.debug.assert(localptr != 0);
         return T{
             .local_heap = local_heap,
             .host_ptr = @intToPtr(*T.Base, local_heap + @intCast(usize, localptr)),
         };
     } else {
-        @compileError("Expected a NativePtr or a ?NativePtr");
+        @compileError("Expected a SandboxPtr or a ?SandboxPtr");
     }
 }
 
-fn toLocalPtr(nativeptr: anytype) u32 {
-    const T = @TypeOf(nativeptr);
-    if (comptime isOptNativePtr(T)) {
-        if (nativeptr) |np| {
+fn toLocalPtr(sandbox_ptr: anytype) u32 {
+    const T = @TypeOf(sandbox_ptr);
+    if (comptime isOptSandboxPtr(T)) {
+        if (sandbox_ptr) |np| {
             const lp = np.localPtr();
             std.debug.assert(lp != 0);
             return lp;
         } else return 0;
-    } else if (comptime isNativePtr(T)) {
-        const lp = nativeptr.localPtr();
+    } else if (comptime isSandboxPtr(T)) {
+        const lp = sandbox_ptr.localPtr();
         std.debug.assert(lp != 0);
         return lp;
     } else {
-        @compileError("Expected a NativePtr or a ?NativePtr");
+        @compileError("Expected a SandboxPtr or a ?SandboxPtr");
     }
 }
 
@@ -339,13 +369,13 @@ pub const Module = struct {
             f64 => return 'F',
             else => {},
         }
-        if (comptime isNativePtr(T) or comptime isOptNativePtr(T)) {
+        if (comptime isSandboxPtr(T) or comptime isOptSandboxPtr(T)) {
             return '*';
         }
         switch (@typeInfo(T)) {
             .Pointer => |ptrti| {
                 if (ptrti.size == .One) {
-                    @compileError("Please use a wasm3.NativePtr instead of raw pointers!");
+                    @compileError("Please use a wasm3.SandboxPtr instead of raw pointers!");
                 }
             },
         }
@@ -432,11 +462,12 @@ pub const Module = struct {
             unreachable;
         };
         const lambda = struct {
-            pub fn l(rt: c.IM3Runtime, sp: [*c]u64, _mem: ?*c_void, arg_userdata: ?*c_void) callconv(.C) ?*const c_void {
+            pub fn l(rt: c.IM3Runtime, import_ctx: *c.M3ImportContext, sp: [*c]u64, _mem: ?*c_void) callconv(.C) ?*const c_void {
                 comptime var type_arr: []const type = &[0]type{};
                 if (has_userdata) {
                     type_arr = type_arr ++ @as([]const type, &[1]type{UserdataType});
                 }
+                std.debug.assert(_mem != null);
                 var mem = @ptrToInt(_mem);
                 var stack = @ptrToInt(sp);
                 const stride = @sizeOf(u64) / @sizeOf(u8);
@@ -445,18 +476,19 @@ pub const Module = struct {
                     .Fn => |fnti| {
                         const RetT = fnti.return_type orelse void;
 
-                        const return_pointer = comptime isNativePtr(RetT) or comptime isOptNativePtr(RetT);
+                        const return_pointer = comptime isSandboxPtr(RetT) or comptime isOptSandboxPtr(RetT);
 
                         const RetPtr = if (RetT == void) void else if (return_pointer) *u32 else *RetT;
                         var ret_val: RetPtr = undefined;
                         if (RetT != void) {
                             ret_val = @intToPtr(RetPtr, stack);
+                            stack += stride;
                         }
 
                         const sub_data = if (has_userdata) 1 else 0;
                         inline for (fnti.args[sub_data..]) |arg, i| {
-                            if (arg.is_generic) unreachable;
 
+                            if (arg.is_generic) unreachable;
                             type_arr = type_arr ++ @as([]const type, &[1]type{arg.arg_type.?});
                         }
 
@@ -464,7 +496,7 @@ pub const Module = struct {
 
                         comptime var idx: usize = 0;
                         if (has_userdata) {
-                            args[idx] = @ptrCast(UserdataType, @alignCast(@alignOf(std.meta.Child(UserdataType)), arg_userdata));
+                            args[idx] = @ptrCast(UserdataType, @alignCast(@alignOf(std.meta.Child(UserdataType)), import_ctx.userdata));
                             idx += 1;
                         }
                         inline for (fnti.args[sub_data..]) |arg, i| {
@@ -472,8 +504,9 @@ pub const Module = struct {
 
                             const ArgT = arg.arg_type.?;
 
-                            if (comptime isNativePtr(ArgT) or comptime isOptNativePtr(ArgT)) {
-                                args[idx] = fromLocalPtr(ArgT, @intToPtr(*u32, stack).*, mem);
+                            if (comptime isSandboxPtr(ArgT) or comptime isOptSandboxPtr(ArgT)) {
+                                const vm_arg_addr: u32 = @intToPtr(*u32, stack).*;
+                                args[idx] = fromLocalPtr(ArgT, vm_arg_addr, mem);
                             } else {
                                 args[idx] = @intToPtr(*ArgT, stack).*;
                             }
@@ -499,6 +532,65 @@ pub const Module = struct {
             }
         }.l;
         try mapError(c.m3_LinkRawFunctionEx(this.impl, library_name, function_name, @as([*]const u8, &sig), lambda, if (has_userdata) userdata else null));
+    }
+
+    /// This is optional.
+    pub fn runStart(this: Module) callconv(.Inline) !void {
+        return mapError(c.m3_RunStart(this.impl));
+    }
+
+    /// Don't free this, it's a member of the Module.
+    /// Returns a generic name if the module is unnamed, such as "<unknown>"
+    pub fn getName(this: Module) callconv(.Inline) ![:0]const u8 {
+        const name = try mapError(c.m3_GetModuleName(this.impl));
+        return std.mem.spanZ(name);
+    }
+
+    pub fn getRuntime(this: Module) callconv(.Inline) Runtime {
+        return .{.impl = c.m3_GetModuleRuntime(this.impl)};
+    }
+
+    pub fn findGlobal(this: Module, global_name: [:0]const u8) callconv(.Inline) ?Global {
+        if(c.m3_FindGlobal(this.impl, global_name)) |global_ptr| {
+            return Global {.impl = global_ptr};
+        }
+        return null;
+    }
+};
+
+pub const Global = struct {
+    pub const Value = union(enum) {
+        Int32: i32,
+        Int64: i64,
+        Float32: f32,
+        Float64: f64,
+    };
+    pub const Type = c.M3ValueType;
+    impl: c.IM3Global,
+    pub fn getType(this: Global) callconv(.Inline) Type {
+        return c.m3_GetGlobalType(this.impl);
+    }
+    pub fn get(this: Global) !Value {
+        var tagged_union: c.M3TaggedValue = undefined;
+        tagged_union.kind = .None;
+        try mapError(c.m3_GetGlobal(this.impl, &tagged_union));
+        return switch(tagged_union.kind) {
+            .None => Error.GlobalTypeMismatch,
+            .Unknown => Error.GlobalTypeMismatch,
+            .Int32 => Value {.Int32 = tagged_union.value.int32},
+            .Int64 => Value {.Int64 = tagged_union.value.int64},
+            .Float32 => Value {.Float32 = tagged_union.value.float32},
+            .Float64 => Value {.Float64 = tagged_union.value.float64},
+        };
+    }
+    pub fn set(this: Global, value_union: Value) !void {
+        var tagged_union: c.M3TaggedValue = switch(value_union) {
+            .Int32 => |value| .{.kind = .Int32, .value = .{.int32 = value}},
+            .Int64 => |value| .{.kind = .Int64, .value = .{.int64 = value}},
+            .Float32 => |value| .{.kind = .Float32, .value = .{.float32 = value}},
+            .Float64 => |value| .{.kind = .Float64, .value = .{.float64 = value}},
+        };
+        return mapError(c.m3_SetGlobal(this.impl, &tagged_union));
     }
 };
 
