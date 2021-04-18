@@ -23,7 +23,12 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
     const cflags = [_][]const u8 {
         "-Wall", "-Wextra", "-Wparentheses", "-Wundef", "-Wpointer-arith", "-Wstrict-aliasing=2",
         "-Werror=implicit-function-declaration",
-        "-Wno-unused-function", "-Wno-unused-variable", "-Wno-unused-parameter", "-Wno-missing-field-initializers"
+        "-Wno-unused-function", "-Wno-unused-variable", "-Wno-unused-parameter", "-Wno-missing-field-initializers",
+    };
+    const cflags_with_windows_posix_aliases = cflags ++ [_][]const u8 {
+        "-Dlseek(fd,off,whence)=_lseek(fd,off,whence)",
+        "-Dfileno(stream)=_fileno(stream)",
+        "-Dsetmode(fd,mode)=_setmode(fd,mode)",
     };
 
     var core_src_file: ?[]const u8 = undefined;
@@ -37,7 +42,14 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
                     core_src_file = path;
                     continue;
                 }
-                lib.addCSourceFile(path, &cflags);
+                if(
+                    target.isWindows() and
+                    std.ascii.eqlIgnoreCase(ent.name, "m3_api_wasi.c")
+                ) {
+                    lib.addCSourceFile(path, &cflags_with_windows_posix_aliases);
+                } else {
+                    lib.addCSourceFile(path, &cflags);
+                }
             }
         }
     }

@@ -637,22 +637,5 @@ pub usingnamespace if (std.Target.current.abi.isGnu() and std.Target.current.os.
             return @intCast(i64, len);
         }
     }
-else if (std.Target.current.os.tag == .windows)
-    struct {
-        extern "c" fn _lseek(fd: c_int, offset: c_long, origin: c_int) callconv(.C) c_long;
-        export fn lseek(fd: c_int, offset: c_long, origin: c_int) callconv(.C) c_long {
-            return _lseek(fd, offset, origin);
-        }
-
-        extern "c" fn _fileno(stream: *c_void) callconv(.C) c_int;
-        export fn fileno(stream: *c_void) callconv(.C) c_int {
-            return _fileno(stream);
-        }
-
-        extern "c" fn _setmode(fd: *c_int, mode: c_int) callconv(.C) c_int;
-        export fn setmode(fd: *c_int, mode: c_int) callconv(.C) c_int {
-            return _setmode(fd, mode);
-        }
-    }
 else
     struct {};
