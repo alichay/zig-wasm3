@@ -12,5 +12,3 @@ deps:
         repo: wasm3
         ref: 7dd44291c7e6d60f6c358c83557e4e9c8b028e53
     root: .gitignore
-build_deps:
-  mattnite/zzz: ^0.0.1
