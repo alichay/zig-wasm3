@@ -18,6 +18,7 @@ pub fn build(b: *Builder) void {
 
     const exe = b.addExecutable("example", "example/test.zig");
     exe.setBuildMode(mode);
+    exe.setTarget(target);
     exe.install();
 
     const wasm_build = b.addStaticLibrary("wasm_example", "example/wasm_src.zig");
@@ -28,7 +29,7 @@ pub fn build(b: *Builder) void {
     wasm_build.out_filename = "wasm_example.wasm";
 
     self_plugin.addTo(exe);
-    exe.addPackagePath("wasm3", "src/main.zig");
+    exe.addPackage(self_plugin.pkg(null));
 
     exe.install();
     wasm_build.install();

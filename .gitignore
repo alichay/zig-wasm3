@@ -1,4 +1,6 @@
 .vscode/
 zig-cache/
+zig-out/
 .gyro/
 deps.zig
+gyro.lock

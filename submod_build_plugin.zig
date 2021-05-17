@@ -3,7 +3,7 @@ const root = @import("root");
 
 /// Queues a build job for the C code of Wasm3.
 /// This builds a static library that depends on libc, so make sure to link that into your exe!
-pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.CrossTarget, wasm3_src_root: []const u8) *std.build.LibExeObjStep {
+pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.CrossTarget, wasm3_root: []const u8) *std.build.LibExeObjStep {
 
     const lib = b.addStaticLibrary("wasm3", null);
     lib.setBuildMode(mode);
@@ -13,7 +13,7 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
 
     lib.defineCMacro("d_m3HasWASI");
     
-    const src_dir = std.fs.path.join(b.allocator, &[_][]const u8{wasm3_src_root, "source"}) catch unreachable;
+    const src_dir = std.fs.path.join(b.allocator, &.{wasm3_root, "source"}) catch unreachable;
 
     var src_dir_handle = std.fs.cwd().openDir(src_dir, .{.iterate = true}) catch unreachable;
     defer src_dir_handle.close();
@@ -67,11 +67,11 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
         //
         // It's kind of ugly, but it works!
 
-        var build_root_handle = std.fs.cwd().openDir(wasm3_src_root, .{}) catch unreachable;
+        var build_root_handle = std.fs.cwd().openDir(wasm3_root, .{}) catch unreachable;
         defer build_root_handle.close();
 
         std.fs.cwd().copyFile(core_src_file.?, build_root_handle, "m3_core.c", .{}) catch unreachable;
-        lib.addCSourceFile(std.fs.path.join(b.allocator, &[_][]const u8{wasm3_src_root, "m3_core.c"}) catch unreachable, &cflags);
+        lib.addCSourceFile(std.fs.path.join(b.allocator, &[_][]const u8{wasm3_root, "m3_core.c"}) catch unreachable, &cflags);
 
         build_root_handle.writeFile("m3_core.h", "#include <m3_core.h>\n" ++
                                                  "#undef d_m3MaxSaneUtf8Length\n" ++
@@ -92,9 +92,19 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
 
 /// Compiles Wasm3 and links it into the provided exe.
 /// If you use this API, you do not need to also use the compile() function.
-pub fn addTo(exe: *std.build.LibExeObjStep, wasm3_src_root: []const u8) void {
+pub fn addTo(exe: *std.build.LibExeObjStep, wasm3_root: []const u8) void {
 
-    var lib = compile(exe.builder, exe.build_mode, exe.target, wasm3_src_root);
+    var lib = compile(exe.builder, exe.build_mode, exe.target, wasm3_root);
     exe.linkLibC();
     exe.linkLibrary(lib);
+}
+
+var file_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
+pub fn pkg(name: ?[]const u8) std.build.Pkg {
+    var fba = std.heap.FixedBufferAllocator.init(&file_buf);
+    return .{
+        .name = name orelse "wasm3",
+        .path = std.fs.path.join(&fba.allocator, &[_][]const u8{std.fs.path.dirname(@src().file).?, "src", "main.zig"}) catch unreachable,
+    };
 }

@@ -1,21 +1,16 @@
 pkgs:
   wasm3-build:
     version: 0.0.1
+    root: gyro_plugin.zig
     description: "Zig bindings and build system for https://github.com/wasm3/wasm3"
     source_url: "https://github.com/alichay/zig-wasm3"
-    root: gyro_plugin.zig
-    files:
-      submod_build_plugin.zig
-      gyro_plugin.zig
-      src/main.zig
-      src/c.zig
-      README.md
-      LICENSE
 deps:
   wasm3_csrc:
-    root: .gitignore
     src:
       github:
         user: wasm3
         repo: wasm3
-        ref: master
+        ref: 7dd44291c7e6d60f6c358c83557e4e9c8b028e53
+    root: .gitignore
+build_deps:
+  mattnite/zzz: ^0.0.1
