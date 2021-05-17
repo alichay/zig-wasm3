@@ -7,8 +7,16 @@ Right now, we only support Gyro, and that support is hacked together with a norm
 
 ## Usage
 
+Building this project requires master-branch zig for now.
+You can obtain a master branch build of zig from https://ziglang.org/download
+
 zig-wasm3 is primarily targeted for the Gyro package manager, but you can also use it with git submodules.
-Building this project requires zig master, for now.
+
+* [Using with Gyro](#using-with-gyro)
+* [Using with Git Submodules](#using-with-git-submodules)
+
+Both methods are pretty simple, and both include a build system to compile wasm3 from source.
+Gyro, however, builds a known-good version of wasm3 that has been tested with these bindings, while submodules will build whatever version you clone, so use caution!
 
 #### Using With Gyro
 To use with Gyro, add the following to your `gyro.zzz` file
