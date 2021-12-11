@@ -1,5 +1,3 @@
-usingnamespace @import("std").c.builtins;
-
 pub const M3Result = [*c]const u8;
 pub const IM3Environment = ?*opaque {};
 pub const IM3Runtime = ?*opaque {};
@@ -29,14 +27,14 @@ pub const M3BacktraceInfo = extern struct {
 
     pub fn lastFrameTruncated(self: *M3BacktraceInfo) callconv(.Inline) bool {
         const std = @import("std");
-        const last_frame = @ptrToInt(usize, self.lastFrame);
+        const last_frame = @ptrToInt(self.lastFrame);
 
         // M3_BACKTRACE_TRUNCATED is defined as (void*)(SIZE_MAX)
         return last_frame == std.math.maxInt(usize);
     }
 };
 
-pub const M3ValueType = extern enum(c_int) {
+pub const M3ValueType = enum(c_int) {
     None = 0,
     Int32 = 1,
     Int64 = 2,

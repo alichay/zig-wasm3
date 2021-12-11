@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 
 const c = @import("c.zig");
+const builtin = @import("builtin");
 
 /// Map an M3Result to the matching Error value.
 fn mapError(result: c.M3Result) Error!void {
@@ -186,7 +187,7 @@ pub const Function = struct {
             var i: comptime_int = 0;
             inline while (i < count) : (i += 1) {
                 const ArgType = @TypeOf(args[i]);
-                if (comptime isSandboxPtr(ArgType) or comptime isOptSandboxPtr(ArgType)) {
+                if (isSandboxPtr(ArgType) or isOptSandboxPtr(ArgType)) {
                     num_ptrs += 1;
                 }
             }
@@ -198,10 +199,14 @@ pub const Function = struct {
         comptime var i: comptime_int = 0;
         inline while (i < count) : (i += 1) {
             const ArgType = @TypeOf(args[i]);
-            if (comptime isSandboxPtr(ArgType) or comptime isOptSandboxPtr(ArgType)) {
-                pointer_values[ptr_i] = toLocalPtr(args[i]);
-                arg_arr[i] = @ptrCast(?*const c_void, &pointer_values[ptr_i]);
-                ptr_i += 1;
+            if (comptime (isSandboxPtr(ArgType) or isOptSandboxPtr(ArgType))) {
+                if(pointer_values.len > 0) {
+                    pointer_values[ptr_i] = toLocalPtr(args[i]);
+                    arg_arr[i] = @ptrCast(?*const c_void, &pointer_values[ptr_i]);
+                    ptr_i += 1;
+                } else {
+                    unreachable;
+                }
             } else {
                 arg_arr[i] = @ptrCast(?*const c_void, &args[i]);
             }
@@ -220,21 +225,24 @@ pub const Function = struct {
         var return_ptr: *c_void = @ptrCast(*c_void, &return_data_buffer);
         try mapError(c.m3_GetResults(this.impl, 1, &[1]?*c_void{return_ptr}));
 
-        if (comptime isSandboxPtr(RetType) or comptime isOptSandboxPtr(RetType)) {
+        if (comptime (isSandboxPtr(RetType) or isOptSandboxPtr(RetType))) {
             const mem_ptr = Extensions.wasm3_addon_get_runtime_mem_ptr(runtime_ptr);
             return fromLocalPtr(
                 RetType,
                 @ptrCast(*u32, @alignCast(@alignOf(u32), return_ptr)).*,
                 @ptrToInt(mem_ptr),
             );
+        } else {
+            switch (RetType) {
+                i8, i16, i32, i64, u8, u16, u32, u64, f32, f64 => {
+                    return @ptrCast(*RetType, @alignCast(@alignOf(RetType), return_ptr)).*;
+                },
+                else => {
+                    @compileLog("Erroring anyway, is this wrong?", isSandboxPtr(RetType) or isOptSandboxPtr(RetType));
+                    @compileError("Invalid WebAssembly return type " ++ @typeName(RetType) ++ "!");
+                },
+            }
         }
-        switch (RetType) {
-            i8, i16, i32, i64, u8, u16, u32, u64, f32, f64 => {
-                return @ptrCast(*RetType, @alignCast(@alignOf(RetType), return_ptr)).*;
-            },
-            else => {},
-        }
-        @compileError("Invalid WebAssembly return type " ++ @typeName(RetType) ++ "!");
     }
 
     /// Don't free this, it's a member of the Function.
@@ -273,7 +281,7 @@ pub fn SandboxPtr(comptime T: type) type {
         }
     }
     return struct {
-        const _is_wasm3_local_ptr = true;
+        pub const _is_wasm3_local_ptr = true;
         pub const Base = T;
         local_heap: usize,
         host_ptr: *T,
@@ -332,7 +340,7 @@ fn fromLocalPtr(comptime T: type, localptr: u32, local_heap: usize) T {
             .host_ptr = @intToPtr(*T.Base, local_heap + @intCast(usize, localptr)),
         };
     } else {
-        @compileError("Expected a SandboxPtr or a ?SandboxPtr");
+        @compileError("Expected a SandboxPtr or a ?SandboxPtr, got " ++ @typeName(T));
     }
 }
 
@@ -369,7 +377,7 @@ pub const Module = struct {
             f64 => return 'F',
             else => {},
         }
-        if (comptime isSandboxPtr(T) or comptime isOptSandboxPtr(T)) {
+        if (comptime (isSandboxPtr(T) or isOptSandboxPtr(T))) {
             return '*';
         }
         switch (@typeInfo(T)) {
@@ -394,11 +402,11 @@ pub const Module = struct {
     ///           Not accessible from within wasm, handled by the interpreter.
     ///           If you don't want userdata, pass a void literal {}.
     pub fn linkLibrary(this: Module, library_name: [:0]const u8, comptime library: type, userdata: anytype) !void {
-        comptime const decls = std.meta.declarations(library);
+        comptime var decls = std.meta.declarations(library);
         inline for (decls) |decl| {
             if (decl.is_pub) {
                 switch (decl.data) {
-                    .Fn => |fninfo| {
+                    .Fn => |_| {
                         const fn_name_z = comptime get_name: {
                             var name_buf: [decl.name.len:0]u8 = undefined;
                             std.mem.copy(u8, &name_buf, decl.name);
@@ -426,7 +434,7 @@ pub const Module = struct {
         errdefer {
             std.log.err("Failed to link proc {s}.{s}!\n", .{ library_name, function_name });
         }
-        comptime const has_userdata = @TypeOf(userdata) != void;
+        comptime var has_userdata = @TypeOf(userdata) != void;
         comptime validate_userdata: {
             if (has_userdata) {
                 switch (@typeInfo(@TypeOf(userdata))) {
@@ -462,7 +470,7 @@ pub const Module = struct {
             unreachable;
         };
         const lambda = struct {
-            pub fn l(rt: c.IM3Runtime, import_ctx: *c.M3ImportContext, sp: [*c]u64, _mem: ?*c_void) callconv(.C) ?*const c_void {
+            pub fn l(_: c.IM3Runtime, import_ctx: *c.M3ImportContext, sp: [*c]u64, _mem: ?*c_void) callconv(.C) ?*const c_void {
                 comptime var type_arr: []const type = &[0]type{};
                 if (has_userdata) {
                     type_arr = type_arr ++ @as([]const type, &[1]type{UserdataType});
@@ -476,9 +484,9 @@ pub const Module = struct {
                     .Fn => |fnti| {
                         const RetT = fnti.return_type orelse void;
 
-                        const return_pointer = comptime isSandboxPtr(RetT) or comptime isOptSandboxPtr(RetT);
+                        comptime var return_pointer = isSandboxPtr(RetT) or isOptSandboxPtr(RetT);
 
-                        const RetPtr = if (RetT == void) void else if (return_pointer) *u32 else *RetT;
+                        const RetPtr = comptime if (RetT == void) void else if (return_pointer) *u32 else *RetT;
                         var ret_val: RetPtr = undefined;
                         if (RetT != void) {
                             ret_val = @intToPtr(RetPtr, stack);
@@ -486,7 +494,7 @@ pub const Module = struct {
                         }
 
                         const sub_data = if (has_userdata) 1 else 0;
-                        inline for (fnti.args[sub_data..]) |arg, i| {
+                        inline for (fnti.args[sub_data..]) |arg| {
 
                             if (arg.is_generic) unreachable;
                             type_arr = type_arr ++ @as([]const type, &[1]type{arg.arg_type.?});
@@ -499,12 +507,12 @@ pub const Module = struct {
                             args[idx] = @ptrCast(UserdataType, @alignCast(@alignOf(std.meta.Child(UserdataType)), import_ctx.userdata));
                             idx += 1;
                         }
-                        inline for (fnti.args[sub_data..]) |arg, i| {
+                        inline for (fnti.args[sub_data..]) |arg| {
                             if (arg.is_generic) unreachable;
 
                             const ArgT = arg.arg_type.?;
 
-                            if (comptime isSandboxPtr(ArgT) or comptime isOptSandboxPtr(ArgT)) {
+                            if (comptime (isSandboxPtr(ArgT) or isOptSandboxPtr(ArgT))) {
                                 const vm_arg_addr: u32 = @intToPtr(*u32, stack).*;
                                 args[idx] = fromLocalPtr(ArgT, vm_arg_addr, mem);
                             } else {
@@ -630,9 +638,9 @@ pub fn printProfilerInfo() callconv(.Inline) void {
 //       different symbol names than the ones the system provides.
 //       This isn't wasm3's fault, but I don't really know *where* blame lies, so we'll just work around it.
 //       We can just reexport these functions. It's a bit hacky, but it gets things running.
-pub usingnamespace if (std.Target.current.abi.isGnu() and std.Target.current.os.tag != .windows)
+pub usingnamespace if (builtin.target.abi.isGnu() and builtin.target.os.tag != .windows)
     struct {
-        export fn getrandom(buf: [*c]u8, len: usize, flags: c_uint) i64 {
+        export fn getrandom(buf: [*c]u8, len: usize, _: c_uint) i64 {
             std.os.getrandom(buf[0..len]) catch return 0;
             return @intCast(i64, len);
         }

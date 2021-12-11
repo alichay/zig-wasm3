@@ -11,7 +11,7 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
     lib.linkLibC();
     lib.disable_sanitize_c = true;
 
-    lib.defineCMacro("d_m3HasWASI");
+    lib.defineCMacro("d_m3HasWASI", "1");
     
     const src_dir = std.fs.path.join(b.allocator, &.{wasm3_root, "source"}) catch unreachable;
 
@@ -105,6 +105,8 @@ pub fn pkg(name: ?[]const u8) std.build.Pkg {
     var fba = std.heap.FixedBufferAllocator.init(&file_buf);
     return .{
         .name = name orelse "wasm3",
-        .path = std.fs.path.join(&fba.allocator, &[_][]const u8{std.fs.path.dirname(@src().file).?, "src", "main.zig"}) catch unreachable,
+        .path = std.build.FileSource {
+            .path = std.fs.path.join(&fba.allocator, &[_][]const u8{std.fs.path.dirname(@src().file).?, "src", "main.zig"}) catch unreachable,
+        }
     };
 }

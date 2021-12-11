@@ -55,7 +55,7 @@ pub fn main() !void {
         }
     }, a);
 
-    var start_fn = try rt.findFunction("_start");
+    var start_fn = try rt.findFunction("main");
     start_fn.call(void, .{}) catch |e| switch (e) {
         error.TrapExit => {},
         else => return e,
@@ -125,7 +125,7 @@ pub fn test_globals(a: *std.mem.Allocator) !void {
     };
     std.debug.warn("'one' value: {d}\n", .{(try one.get()).Float32});
     if((try one.get()).Float32 != 1.0) {
-        std.log.err("Global 'one' has a different value. This is a wasm3 bug!\n", .{});
+        std.log.err("Global 'one' has a different value. This is probably a wasm3 bug!\n", .{});
     }
 
     var some_setter = try rt.findFunction("set_some");
