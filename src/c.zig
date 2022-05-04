@@ -64,7 +64,7 @@ pub const M3ImportInfo = extern struct {
 };
 
 pub const M3ImportContext = extern struct {
-    userdata: ?*c_void,
+    userdata: ?*anyopaque,
     function: IM3Function,
 };
 
@@ -132,10 +132,10 @@ pub extern var m3Err_trapStackOverflow: M3Result;
 
 pub extern fn m3_NewEnvironment() IM3Environment;
 pub extern fn m3_FreeEnvironment(i_environment: IM3Environment) void;
-pub extern fn m3_NewRuntime(io_environment: IM3Environment, i_stackSizeInBytes: u32, i_userdata: ?*c_void) IM3Runtime;
+pub extern fn m3_NewRuntime(io_environment: IM3Environment, i_stackSizeInBytes: u32, i_userdata: ?*anyopaque) IM3Runtime;
 pub extern fn m3_FreeRuntime(i_runtime: IM3Runtime) void;
 pub extern fn m3_GetMemory(i_runtime: IM3Runtime, o_memorySizeInBytes: [*c]u32, i_memoryIndex: u32) [*c]u8;
-pub extern fn m3_GetUserData(i_runtime: IM3Runtime) ?*c_void;
+pub extern fn m3_GetUserData(i_runtime: IM3Runtime) ?*anyopaque;
 pub extern fn m3_ParseModule(i_environment: IM3Environment, o_module: *IM3Module, i_wasmBytes: [*]const u8, i_numWasmBytes: u32) M3Result;
 pub extern fn m3_FreeModule(i_module: IM3Module) void;
 pub extern fn m3_LoadModule(io_runtime: IM3Runtime, io_module: IM3Module) M3Result;
@@ -143,9 +143,9 @@ pub extern fn m3_RunStart(i_module: IM3Module) M3Result;
 /// Arguments and return values are passed in and out through the stack pointer _sp.
 /// Placeholder return value slots are first and arguments after. So, the first argument is at _sp [numReturns]
 /// Return values should be written into _sp [0] to _sp [num_returns - 1]
-pub const M3RawCall = ?fn (IM3Runtime, ctx: *M3ImportContext, [*c]u64, ?*c_void) callconv(.C) ?*const c_void;
+pub const M3RawCall = ?fn (IM3Runtime, ctx: *M3ImportContext, [*c]u64, ?*anyopaque) callconv(.C) ?*const anyopaque;
 pub extern fn m3_LinkRawFunction(io_module: IM3Module, i_moduleName: [*:0]const u8, i_functionName: [*:0]const u8, i_signature: [*c]const u8, i_function: M3RawCall) M3Result;
-pub extern fn m3_LinkRawFunctionEx(io_module: IM3Module, i_moduleName: [*:0]const u8, i_functionName: [*:0]const u8, i_signature: [*c]const u8, i_function: M3RawCall, i_userdata: ?*const c_void) M3Result;
+pub extern fn m3_LinkRawFunctionEx(io_module: IM3Module, i_moduleName: [*:0]const u8, i_functionName: [*:0]const u8, i_signature: [*c]const u8, i_function: M3RawCall, i_userdata: ?*const anyopaque) M3Result;
 /// Returns "<unknown>" on failure, but this behavior isn't described in the API so could be subject to change.
 pub extern fn m3_GetModuleName(i_module: IM3Module) [*:0]u8;
 pub extern fn m3_GetModuleRuntime(i_module: IM3Module) IM3Runtime;
@@ -160,9 +160,9 @@ pub extern fn m3_GetRetCount(i_function: IM3Function) u32;
 pub extern fn m3_GetArgType(i_function: IM3Function, index: u32) M3ValueType;
 pub extern fn m3_GetRetType(i_function: IM3Function, index: u32) M3ValueType;
 pub extern fn m3_CallV(i_function: IM3Function, ...) M3Result;
-pub extern fn m3_Call(i_function: IM3Function, i_argc: u32, i_argptrs: [*c]?*const c_void) M3Result;
+pub extern fn m3_Call(i_function: IM3Function, i_argc: u32, i_argptrs: [*c]?*const anyopaque) M3Result;
 pub extern fn m3_CallArgV(i_function: IM3Function, i_argc: u32, i_argv: [*c][*c]const u8) M3Result;
-pub extern fn m3_GetResults(i_function: IM3Function, i_retc: u32, ret_ptrs: [*c]?*c_void) M3Result;
+pub extern fn m3_GetResults(i_function: IM3Function, i_retc: u32, ret_ptrs: [*c]?*anyopaque) M3Result;
 pub extern fn m3_GetErrorInfo(i_runtime: IM3Runtime, info: [*c]M3ErrorInfo) void;
 pub extern fn m3_ResetErrorInfo(i_runtime: IM3Runtime) void;
 /// Returns "<unnamed>" on failure, but this behavior isn't described in the API so could be subject to change.

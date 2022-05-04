@@ -106,7 +106,7 @@ pub fn pkg(name: ?[]const u8) std.build.Pkg {
     return .{
         .name = name orelse "wasm3",
         .path = std.build.FileSource {
-            .path = std.fs.path.join(&fba.allocator, &[_][]const u8{std.fs.path.dirname(@src().file).?, "src", "main.zig"}) catch unreachable,
+            .path = std.fs.path.join(fba.allocator(), &[_][]const u8{std.fs.path.dirname(@src().file).?, "src", "main.zig"}) catch unreachable,
         }
     };
 }

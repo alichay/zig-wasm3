@@ -114,7 +114,7 @@ pub const Runtime = struct {
         }
         return null;
     }
-    pub fn getUserData(this: Runtime) callconv(.Inline) ?*c_void {
+    pub fn getUserData(this: Runtime) callconv(.Inline) ?*anyopaque {
         return c.m3_GetUserData(this.impl);
     }
 
@@ -195,20 +195,20 @@ pub const Function = struct {
         };
         var pointer_values: [num_pointers]u32 = undefined;
 
-        var arg_arr: [count]?*const c_void = undefined;
+        var arg_arr: [count]?*const anyopaque = undefined;
         comptime var i: comptime_int = 0;
         inline while (i < count) : (i += 1) {
             const ArgType = @TypeOf(args[i]);
             if (comptime (isSandboxPtr(ArgType) or isOptSandboxPtr(ArgType))) {
                 if(pointer_values.len > 0) {
                     pointer_values[ptr_i] = toLocalPtr(args[i]);
-                    arg_arr[i] = @ptrCast(?*const c_void, &pointer_values[ptr_i]);
+                    arg_arr[i] = @ptrCast(?*const anyopaque, &pointer_values[ptr_i]);
                     ptr_i += 1;
                 } else {
                     unreachable;
                 }
             } else {
-                arg_arr[i] = @ptrCast(?*const c_void, &args[i]);
+                arg_arr[i] = @ptrCast(?*const anyopaque, &args[i]);
             }
         }
         try mapError(c.m3_Call(this.impl, @intCast(u32, count), if (count == 0) null else &arg_arr));
@@ -222,8 +222,8 @@ pub const Function = struct {
 
         const runtime_ptr = Extensions.wasm3_addon_get_fn_rt(this.impl);
         var return_data_buffer: u64 = undefined;
-        var return_ptr: *c_void = @ptrCast(*c_void, &return_data_buffer);
-        try mapError(c.m3_GetResults(this.impl, 1, &[1]?*c_void{return_ptr}));
+        var return_ptr: *anyopaque = @ptrCast(*anyopaque, &return_data_buffer);
+        try mapError(c.m3_GetResults(this.impl, 1, &[1]?*anyopaque{return_ptr}));
 
         if (comptime (isSandboxPtr(RetType) or isOptSandboxPtr(RetType))) {
             const mem_ptr = Extensions.wasm3_addon_get_runtime_mem_ptr(runtime_ptr);
@@ -470,7 +470,7 @@ pub const Module = struct {
             unreachable;
         };
         const lambda = struct {
-            pub fn l(_: c.IM3Runtime, import_ctx: *c.M3ImportContext, sp: [*c]u64, _mem: ?*c_void) callconv(.C) ?*const c_void {
+            pub fn l(_: c.IM3Runtime, import_ctx: *c.M3ImportContext, sp: [*c]u64, _mem: ?*anyopaque) callconv(.C) ?*const anyopaque {
                 comptime var type_arr: []const type = &[0]type{};
                 if (has_userdata) {
                     type_arr = type_arr ++ @as([]const type, &[1]type{UserdataType});
@@ -611,7 +611,7 @@ pub const Environment = struct {
     pub fn deinit(this: Environment) callconv(.Inline) void {
         c.m3_FreeEnvironment(this.impl);
     }
-    pub fn createRuntime(this: Environment, stack_size: u32, userdata: ?*c_void) callconv(.Inline) Runtime {
+    pub fn createRuntime(this: Environment, stack_size: u32, userdata: ?*anyopaque) callconv(.Inline) Runtime {
         return .{ .impl = c.m3_NewRuntime(this.impl, stack_size, userdata) };
     }
     pub fn parseModule(this: Environment, wasm: []const u8) callconv(.Inline) !Module {

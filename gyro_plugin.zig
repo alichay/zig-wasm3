@@ -608,7 +608,7 @@ const zzz = struct {
                 return self.Int == other.Int;
             }
             if (self == .Float and other == .Float) {
-                return std.math.approxEq(f32, self.Float, other.Float, std.math.f32_epsilon);
+                return std.math.approxEqAbs(f32, self.Float, other.Float, std.math.f32_epsilon);
             }
             if (self == .Bool and other == .Bool) {
                 return self.Bool == other.Bool;
