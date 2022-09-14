@@ -91,6 +91,7 @@ pub extern var m3Err_tooManyMemorySections: M3Result;
 pub extern var m3Err_tooManyArgsRets: M3Result;
 
 // link errors
+pub extern var m3Err_moduleNotLinked: M3Result;
 pub extern var m3Err_moduleAlreadyLinked: M3Result;
 pub extern var m3Err_functionLookupFailed: M3Result;
 pub extern var m3Err_functionImportMissing: M3Result;
@@ -100,7 +101,7 @@ pub extern var m3Err_malformedFunctionSignature: M3Result;
 // compilation errors
 pub extern var m3Err_noCompiler: M3Result;
 pub extern var m3Err_unknownOpcode: M3Result;
-pub extern var m3Err_restictedOpcode: M3Result;
+pub extern var m3Err_restrictedOpcode: M3Result;
 pub extern var m3Err_functionStackOverflow: M3Result;
 pub extern var m3Err_functionStackUnderrun: M3Result;
 pub extern var m3Err_mallocFailedCodePage: M3Result;
@@ -134,13 +135,24 @@ pub extern var m3Err_trapStackOverflow: M3Result;
 
 pub extern fn m3_NewEnvironment() IM3Environment;
 pub extern fn m3_FreeEnvironment(i_environment: IM3Environment) void;
+pub const M3SectionHandler =
+    if (builtin.zig_backend == .stage1)
+        ?fn (IM3Module, name: [*:0]const u8, start: [*]const u8, end: *const u8) callconv(.C) M3Result
+    else
+        ?*const fn (IM3Module, name: [*:0]const u8, start: [*]const u8, end: *const u8) callconv(.C) M3Result;
+pub extern fn m3_SetCustomSectionHandler(i_environment: IM3Environment, i_handler: M3SectionHandler) void;
 pub extern fn m3_NewRuntime(io_environment: IM3Environment, i_stackSizeInBytes: u32, i_userdata: ?*anyopaque) IM3Runtime;
 pub extern fn m3_FreeRuntime(i_runtime: IM3Runtime) void;
 pub extern fn m3_GetMemory(i_runtime: IM3Runtime, o_memorySizeInBytes: [*c]u32, i_memoryIndex: u32) [*c]u8;
+/// This is used internally by Raw Function helpers
+pub extern fn m3_GetMemorySize(i_runtime: IM3Runtime) u32;
 pub extern fn m3_GetUserData(i_runtime: IM3Runtime) ?*anyopaque;
 pub extern fn m3_ParseModule(i_environment: IM3Environment, o_module: *IM3Module, i_wasmBytes: [*]const u8, i_numWasmBytes: u32) M3Result;
 pub extern fn m3_FreeModule(i_module: IM3Module) void;
+///  LoadModule transfers ownership of a module to the runtime. Do not free modules once successfully loaded into the runtime
 pub extern fn m3_LoadModule(io_runtime: IM3Runtime, io_module: IM3Module) M3Result;
+/// Optional, compiles all functions in the module
+pub extern fn m3_CompileModule(io_module: IM3Module) M3Result;
 pub extern fn m3_RunStart(i_module: IM3Module) M3Result;
 /// Arguments and return values are passed in and out through the stack pointer _sp.
 /// Placeholder return value slots are first and arguments after. So, the first argument is at _sp [numReturns]
@@ -154,6 +166,7 @@ pub extern fn m3_LinkRawFunction(io_module: IM3Module, i_moduleName: [*:0]const 
 pub extern fn m3_LinkRawFunctionEx(io_module: IM3Module, i_moduleName: [*:0]const u8, i_functionName: [*:0]const u8, i_signature: [*c]const u8, i_function: M3RawCall, i_userdata: ?*const anyopaque) M3Result;
 /// Returns "<unknown>" on failure, but this behavior isn't described in the API so could be subject to change.
 pub extern fn m3_GetModuleName(i_module: IM3Module) [*:0]u8;
+pub extern fn m3_SetModuleName(i_module: IM3Module, name: [*:0]const u8) void;
 pub extern fn m3_GetModuleRuntime(i_module: IM3Module) IM3Runtime;
 pub extern fn m3_FindGlobal(io_module: IM3Module, i_globalName: [*:0]const u8) IM3Global;
 pub extern fn m3_GetGlobal(i_global: IM3Global, i_value: *M3TaggedValue) M3Result;
