@@ -15,7 +15,7 @@ pub fn compile(b: *std.build.Builder, mode: std.builtin.Mode, target: std.zig.Cr
     
     const src_dir = std.fs.path.join(b.allocator, &.{wasm3_root, "source"}) catch unreachable;
 
-    var src_dir_handle = std.fs.cwd().openDir(src_dir, .{.iterate = true}) catch unreachable;
+    var src_dir_handle = std.fs.cwd().openIterableDir(src_dir, .{}) catch unreachable;
     defer src_dir_handle.close();
 
     lib.c_std = .C99;
@@ -105,7 +105,7 @@ pub fn pkg(name: ?[]const u8) std.build.Pkg {
     var fba = std.heap.FixedBufferAllocator.init(&file_buf);
     return .{
         .name = name orelse "wasm3",
-        .path = std.build.FileSource {
+        .source = std.build.FileSource {
             .path = std.fs.path.join(fba.allocator(), &[_][]const u8{std.fs.path.dirname(@src().file).?, "src", "main.zig"}) catch unreachable,
         }
     };
