@@ -8,13 +8,13 @@ const builtin = @import("builtin");
 fn mapError(result: c.M3Result) Error!void {
     @setEvalBranchQuota(50000);
     const match_list = comptime get_results: {
-        const Declaration = std.builtin.TypeInfo.Declaration;
+        const Declaration = std.builtin.Type.Declaration;
         var result_values: []const [2][]const u8 = &[0][2][]const u8{};
-        for (std.meta.declarations(c)) |decl| {
+        for (@typeInfo(c).Struct.decls) |decl| {
             const d: Declaration = decl;
             if (std.mem.startsWith(u8, d.name, "m3Err_")) {
                 if (!std.mem.eql(u8, d.name, "m3Err_none")) {
-                    var error_name = d.name[("m3Err_").len..];
+                    var error_name: []const u8 = d.name[("m3Err_").len..];
 
                     error_name = get: for (std.meta.fieldNames(Error)) |f| {
                         if (std.ascii.eqlIgnoreCase(error_name, f)) {
@@ -402,20 +402,14 @@ pub const Module = struct {
     ///           Not accessible from within wasm, handled by the interpreter.
     ///           If you don't want userdata, pass a void literal {}.
     pub fn linkLibrary(this: Module, library_name: [:0]const u8, comptime library: type, userdata: anytype) !void {
-        comptime var decls = std.meta.declarations(library);
-        inline for (decls) |decl| {
+        inline for (@typeInfo(library).Struct.decls) |decl| {
             if (decl.is_pub) {
-                switch (decl.data) {
-                    .Fn => |_| {
-                        const fn_name_z = comptime get_name: {
-                            var name_buf: [decl.name.len:0]u8 = undefined;
-                            std.mem.copy(u8, &name_buf, decl.name);
-                            break :get_name name_buf;
-                        };
-                        try this.linkRawFunction(library_name, &fn_name_z, @field(library, decl.name), userdata);
-                    },
-                    else => continue,
-                }
+                    const fn_name_z = comptime get_name: {
+                        var name_buf: [decl.name.len:0]u8 = undefined;
+                        std.mem.copy(u8, &name_buf, decl.name);
+                        break :get_name name_buf;
+                    };
+                    try this.linkRawFunction(library_name, &fn_name_z, @field(library, decl.name), userdata);
             }
         }
     }

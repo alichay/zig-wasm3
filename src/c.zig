@@ -1,3 +1,5 @@
+const builtin = @import("builtin");
+
 pub const M3Result = [*c]const u8;
 pub const IM3Environment = ?*opaque {};
 pub const IM3Runtime = ?*opaque {};
@@ -143,7 +145,11 @@ pub extern fn m3_RunStart(i_module: IM3Module) M3Result;
 /// Arguments and return values are passed in and out through the stack pointer _sp.
 /// Placeholder return value slots are first and arguments after. So, the first argument is at _sp [numReturns]
 /// Return values should be written into _sp [0] to _sp [num_returns - 1]
-pub const M3RawCall = ?fn (IM3Runtime, ctx: *M3ImportContext, [*c]u64, ?*anyopaque) callconv(.C) ?*const anyopaque;
+pub const M3RawCall =
+    if (builtin.zig_backend == .stage1)
+        ?fn (IM3Runtime, ctx: *M3ImportContext, [*c]u64, ?*anyopaque) callconv(.C) ?*const anyopaque
+    else
+        ?*const fn (IM3Runtime, ctx: *M3ImportContext, [*c]u64, ?*anyopaque) callconv(.C) ?*const anyopaque;
 pub extern fn m3_LinkRawFunction(io_module: IM3Module, i_moduleName: [*:0]const u8, i_functionName: [*:0]const u8, i_signature: [*c]const u8, i_function: M3RawCall) M3Result;
 pub extern fn m3_LinkRawFunctionEx(io_module: IM3Module, i_moduleName: [*:0]const u8, i_functionName: [*:0]const u8, i_signature: [*c]const u8, i_function: M3RawCall, i_userdata: ?*const anyopaque) M3Result;
 /// Returns "<unknown>" on failure, but this behavior isn't described in the API so could be subject to change.
