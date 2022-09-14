@@ -4,8 +4,8 @@ const testing = std.testing;
 const c = @import("c.zig");
 const builtin = @import("builtin");
 
-/// Map an M3Result to the matching Error value.
-fn mapError(result: c.M3Result) Error!void {
+fn createErrorMappingFunctions() type {
+    
     @setEvalBranchQuota(50000);
     const match_list = comptime get_results: {
         const Declaration = std.builtin.Type.Declaration;
@@ -30,13 +30,32 @@ fn mapError(result: c.M3Result) Error!void {
         }
         break :get_results result_values;
     };
-
-    if (result == c.m3Err_none) return;
-    inline for (match_list) |pair| {
-        if (result == @field(c, pair[0])) return @field(Error, pair[1]);
-    }
-    unreachable;
+    
+    return struct {
+        
+        /// Map an M3Result to the matching Error value.
+        pub fn mapError(result: c.M3Result) Error!void {
+        
+            if (result == c.m3Err_none) return;
+            inline for (match_list) |pair| {
+                if (result == @field(c, pair[0])) return @field(Error, pair[1]);
+            }
+            unreachable;
+        }
+        pub fn mapErrorReverse(result: Error!void) c.M3Result {
+            if (result) {
+                return c.m3Err_none;
+            } else |err| {
+                inline for (match_list) |pair| {
+                    if (err == @field(Error, pair[1])) return @field(c, pair[0]);
+                }
+            }
+            unreachable;
+        }
+    };
 }
+
+const ErrorMapping = createErrorMappingFunctions();
 
 pub const Error = error{
     // general errors
@@ -58,6 +77,7 @@ pub const Error = error{
     TooManyArgsRets,
 
     // link errors
+    ModuleNotLinked,
     ModuleAlreadyLinked,
     FunctionLookupFailed,
     FunctionImportMissing,
@@ -114,17 +134,22 @@ pub const Runtime = struct {
         }
         return null;
     }
+    
+    pub fn getMemorySize(this: Runtime) callconv(.Inline) u32 {
+        return c.m3_GetMemorySize(this.impl);
+    }
+    
     pub fn getUserData(this: Runtime) callconv(.Inline) ?*anyopaque {
         return c.m3_GetUserData(this.impl);
     }
 
     pub fn loadModule(this: Runtime, module: Module) callconv(.Inline) !void {
-        try mapError(c.m3_LoadModule(this.impl, module.impl));
+        try ErrorMapping.mapError(c.m3_LoadModule(this.impl, module.impl));
     }
 
     pub fn findFunction(this: Runtime, function_name: [:0]const u8) callconv(.Inline) !Function {
         var func = Function{ .impl = undefined };
-        try mapError(c.m3_FindFunction(&func.impl, this.impl, function_name.ptr));
+        try ErrorMapping.mapError(c.m3_FindFunction(&func.impl, this.impl, function_name.ptr));
         return func;
     }
     pub fn printRuntimeInfo(this: Runtime) callconv(.Inline) void {
@@ -211,7 +236,7 @@ pub const Function = struct {
                 arg_arr[i] = @ptrCast(?*const anyopaque, &args[i]);
             }
         }
-        try mapError(c.m3_Call(this.impl, @intCast(u32, count), if (count == 0) null else &arg_arr));
+        try ErrorMapping.mapError(c.m3_Call(this.impl, @intCast(u32, count), if (count == 0) null else &arg_arr));
 
         if (RetType == void) return;
 
@@ -223,7 +248,7 @@ pub const Function = struct {
         const runtime_ptr = Extensions.wasm3_addon_get_fn_rt(this.impl);
         var return_data_buffer: u64 = undefined;
         var return_ptr: *anyopaque = @ptrCast(*anyopaque, &return_data_buffer);
-        try mapError(c.m3_GetResults(this.impl, 1, &[1]?*anyopaque{return_ptr}));
+        try ErrorMapping.mapError(c.m3_GetResults(this.impl, 1, &[1]?*anyopaque{return_ptr}));
 
         if (comptime (isSandboxPtr(RetType) or isOptSandboxPtr(RetType))) {
             const mem_ptr = Extensions.wasm3_addon_get_runtime_mem_ptr(runtime_ptr);
@@ -248,8 +273,8 @@ pub const Function = struct {
     /// Don't free this, it's a member of the Function.
     /// Returns a generic name if the module is unnamed, such as "<unnamed>"
     pub fn getName(this: Function) callconv(.Inline) ![:0]const u8 {
-        const name = try mapError(c.m3_GetFunctionName(this.impl));
-        return std.mem.spanZ(name);
+        const name = try ErrorMapping.mapError(c.m3_GetFunctionName(this.impl));
+        return std.mem.span(name);
     }
 
     pub fn getModule(this: Function) callconv(.Inline) Module {
@@ -391,7 +416,7 @@ pub const Module = struct {
     }
 
     pub fn linkWasi(this: Module) !void {
-        return mapError(c.m3_LinkWASI(this.impl));
+        return ErrorMapping.mapError(c.m3_LinkWASI(this.impl));
     }
 
     /// Links all functions in a struct to the module.
@@ -533,19 +558,29 @@ pub const Module = struct {
                 }
             }
         }.l;
-        try mapError(c.m3_LinkRawFunctionEx(this.impl, library_name, function_name, @as([*]const u8, &sig), lambda, if (has_userdata) userdata else null));
+        try ErrorMapping.mapError(c.m3_LinkRawFunctionEx(this.impl, library_name, function_name, @as([*]const u8, &sig), lambda, if (has_userdata) userdata else null));
+    }
+    
+    /// Optional, compiles all functions in the module
+    pub fn compile(this: Module) callconv(.Inline) !void {
+        return ErrorMapping.mapError(c.m3_CompileModule(this.impl));
     }
 
     /// This is optional.
     pub fn runStart(this: Module) callconv(.Inline) !void {
-        return mapError(c.m3_RunStart(this.impl));
+        return ErrorMapping.mapError(c.m3_RunStart(this.impl));
     }
 
     /// Don't free this, it's a member of the Module.
     /// Returns a generic name if the module is unnamed, such as "<unknown>"
     pub fn getName(this: Module) callconv(.Inline) ![:0]const u8 {
-        const name = try mapError(c.m3_GetModuleName(this.impl));
-        return std.mem.spanZ(name);
+        const name = try ErrorMapping.mapError(c.m3_GetModuleName(this.impl));
+        return std.mem.span(name);
+    }
+    
+    /// Assumes that name will last as long as the module, does not copy
+    pub fn setName(this: Module, name: [:0]const u8) callconv(.Inline) void {
+        c.m3_SetModuleName(this.impl, name);
     }
 
     pub fn getRuntime(this: Module) callconv(.Inline) Runtime {
@@ -575,7 +610,7 @@ pub const Global = struct {
     pub fn get(this: Global) !Value {
         var tagged_union: c.M3TaggedValue = undefined;
         tagged_union.kind = .None;
-        try mapError(c.m3_GetGlobal(this.impl, &tagged_union));
+        try ErrorMapping.mapError(c.m3_GetGlobal(this.impl, &tagged_union));
         return switch(tagged_union.kind) {
             .None => Error.GlobalTypeMismatch,
             .Unknown => Error.GlobalTypeMismatch,
@@ -592,7 +627,7 @@ pub const Global = struct {
             .Float32 => |value| .{.kind = .Float32, .value = .{.float32 = value}},
             .Float64 => |value| .{.kind = .Float64, .value = .{.float64 = value}},
         };
-        return mapError(c.m3_SetGlobal(this.impl, &tagged_union));
+        return ErrorMapping.mapError(c.m3_SetGlobal(this.impl, &tagged_union));
     }
 };
 
@@ -605,19 +640,28 @@ pub const Environment = struct {
     pub fn deinit(this: Environment) callconv(.Inline) void {
         c.m3_FreeEnvironment(this.impl);
     }
+    pub fn setCustomSectionHandler(this: Environment, comptime handler: fn(module: Module, name: []const u8, bytes: []const u8) Error!void) callconv(.Inline) void {
+        const handler_adapter = struct {
+            pub fn l(module: c.IM3Module, name: [*:0]const u8, start: [*]const u8, end: *const u8) callconv(.C) c.M3Result {
+                var result = handler(.{.impl = module}, std.mem.span(name), start[0..(@ptrToInt(end) - @ptrToInt(start))]);
+                return ErrorMapping.mapErrorReverse(result);
+            }
+        }.l;
+        c.m3_SetCustomSectionHandler(this.impl, handler_adapter);
+    }
     pub fn createRuntime(this: Environment, stack_size: u32, userdata: ?*anyopaque) callconv(.Inline) Runtime {
         return .{ .impl = c.m3_NewRuntime(this.impl, stack_size, userdata) };
     }
     pub fn parseModule(this: Environment, wasm: []const u8) callconv(.Inline) !Module {
         var mod = Module{ .impl = undefined };
         var res = c.m3_ParseModule(this.impl, &mod.impl, wasm.ptr, @intCast(u32, wasm.len));
-        try mapError(res);
+        try ErrorMapping.mapError(res);
         return mod;
     }
 };
 
 pub fn yield() callconv(.Inline) !void {
-    return mapError(c.m3_Yield());
+    return ErrorMapping.mapError(c.m3_Yield());
 }
 pub fn printM3Info() callconv(.Inline) void {
     c.m3_PrintM3Info();
