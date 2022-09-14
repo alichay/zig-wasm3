@@ -14,7 +14,7 @@ fn mapError(result: c.M3Result) Error!void {
             const d: Declaration = decl;
             if (std.mem.startsWith(u8, d.name, "m3Err_")) {
                 if (!std.mem.eql(u8, d.name, "m3Err_none")) {
-                    var error_name = d.name[("m3Err_").len..];
+                    var error_name: []const u8 = d.name[("m3Err_").len..];
 
                     error_name = get: for (std.meta.fieldNames(Error)) |f| {
                         if (std.ascii.eqlIgnoreCase(error_name, f)) {
