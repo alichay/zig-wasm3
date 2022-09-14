@@ -98,7 +98,7 @@ pub extern var m3Err_malformedFunctionSignature: M3Result;
 // compilation errors
 pub extern var m3Err_noCompiler: M3Result;
 pub extern var m3Err_unknownOpcode: M3Result;
-pub extern var m3Err_restictedOpcode: M3Result;
+pub extern var m3Err_restrictedOpcode: M3Result;
 pub extern var m3Err_functionStackOverflow: M3Result;
 pub extern var m3Err_functionStackUnderrun: M3Result;
 pub extern var m3Err_mallocFailedCodePage: M3Result;

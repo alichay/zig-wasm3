@@ -67,7 +67,7 @@ pub const Error = error{
     // compilation errors
     NoCompiler,
     UnknownOpcode,
-    RestictedOpcode,
+    RestrictedOpcode,
     FunctionStackOverflow,
     FunctionStackUnderrun,
     MallocFailedCodePage,

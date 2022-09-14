@@ -8,5 +8,5 @@ deps:
   wasm3_csrc:
     git:
       url: "https://github.com/wasm3/wasm3.git"
-      ref: 7dd44291c7e6d60f6c358c83557e4e9c8b028e53
+      ref: fa18e9ece4dd45371deac69ded32838470a55c1b
       root: .gitignore
